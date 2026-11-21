@@ -38,14 +38,21 @@ size, F12 or Esc closes. They are kept in `~/.local/share/joyride/joyride.cfg`.
   behaviour of zooming in. Menus stay 640×480.
 * **Textures** — bilinear filtering, the 3dfx version's look (default), or
   sharp; see [`docs/exe-3dfx.md`](docs/exe-3dfx.md). 32-bit colour only.
+* **Motion** — smooth (default): frames drawn between the game's own steps,
+  up to the display's refresh rate, with the game's speed unchanged (it
+  still steps 23.3 times a second; the picture runs one step, 43 ms,
+  behind). Or original: 23.3 frames a second. See
+  [`src/hle/smooth.c`](src/hle/smooth.c). At 1024×768 it reaches about 58
+  fps with sharp textures and 40–47 filtered. Turning the game's limiter
+  off (F8) still just runs the game faster.
 * **Scaling** of the picture to the window: sharp (default), smooth,
   nearest, integer.
 * **Fullscreen** (also F11 or Alt+Enter).
 
 The renderer is software, as in the original: up to 2560×1440 runs at full
 speed with filtering; 3440×1440 needs sharp textures to keep it.
-`JOYRIDE_RES=<w>x<h>|desktop|game`, `JOYRIDE_FILTER=0|1` and
-`JOYRIDE_SCALE=<mode>` override the file for one run.
+`JOYRIDE_RES=<w>x<h>|desktop|game`, `JOYRIDE_FILTER=0|1`, `JOYRIDE_SMOOTH=0|1`
+and `JOYRIDE_SCALE=<mode>` override the file for one run.
 
 Not yet: Windows and macOS builds.
 
@@ -70,7 +77,7 @@ joyride plays with joyride, not with the original Windows game.
 
 | Key | |
 | --- | --- |
-| F12 | settings: screen size, textures, scaling, fullscreen |
+| F12 | settings: screen size, textures, motion, scaling, fullscreen |
 | F11, Alt+Enter | fullscreen |
 | Esc, then Enter | quit (the game's own menu); closing the window twice also quits |
 
@@ -103,9 +110,10 @@ Nothing in the install is modified: saves, settings and the registry go to
 `~/.local/share/joyride/overlay`. Developer switches: `JOYRIDE_HEADLESS=1`,
 `JOYRIDE_DUMP=<dir>` (one frame per second as PPM), `JOYRIDE_QUIT_AFTER=<s>`,
 `JOYRIDE_KEYS="4:RETURN,15:UP:6"` (key presses, or holds, at times in seconds),
-`JOYRIDE_MAX_FPS` (default 60, 0 = unlimited),
-`JOYRIDE_GPU_DEBUG=1` (SDL_GPU validation), `JOYRIDE_FPS=1` (the game's frame
-rate every 5 s; it should hold 23.3).
+`JOYRIDE_MAX_FPS` (default the display's refresh rate in play, 60 in menus;
+0 = unlimited), `JOYRIDE_SMOOTH_DEBUG=1` (frame timing),
+`JOYRIDE_GPU_DEBUG=1` (SDL_GPU validation), `JOYRIDE_FPS=1` (frames shown and game
+steps a second, every 5 s; steps should hold 23.3).
 
 ## Supported game data
 

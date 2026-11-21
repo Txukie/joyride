@@ -77,6 +77,7 @@ add_executable(joyride
     src/hle/dplay.c
     src/hle/texfilter.c
     src/hle/display.c
+    src/hle/smooth.c
     src/platform/overlay.c
     $<TARGET_OBJECTS:joyride_gen>)
 target_include_directories(joyride PRIVATE src/hle)

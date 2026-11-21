@@ -39,18 +39,26 @@ static void x_DirectDrawCreateClipper(void) {
  * With the camera moving (it climbs and drops with the player's speed) the
  * picture flickered between two heights: "the camera zooms in and out".
  * Copying keeps each surface's memory where the game expects it. */
-/* JOYRIDE_FPS=1: print the game's frame rate (flips per second) every 5 s */
+/* JOYRIDE_FPS=1: print the frames shown a second and the game's steps a
+ * second (it should hold 23.3) every 5 s */
 static void count_flip(void) {
     static int on = -1, n;
     static struct timespec t0;
     if (on < 0) on = getenv("JOYRIDE_FPS") && atoi(getenv("JOYRIDE_FPS"));
     if (!on) return;
     struct timespec t;
+    int shown = !joyride_smooth_skip();      /* frames that reach the screen */
     clock_gettime(CLOCK_MONOTONIC, &t);
     if (!t0.tv_sec) t0 = t;
-    n++;
+    n += shown;
     double dt = (double)(t.tv_sec - t0.tv_sec) + (double)(t.tv_nsec - t0.tv_nsec) / 1e9;
-    if (dt >= 5.0) { fprintf(stderr, "[joyride] %.1f fps\n", n / dt); n = 0; t0 = t; }
+    static uint32_t s0;
+    if (dt >= 5.0) {
+        extern uint32_t joyride_smooth_steps(void);
+        uint32_t s = joyride_smooth_steps();
+        fprintf(stderr, "[joyride] %.1f fps, %.1f game steps/s\n", n / dt, (s - s0) / dt);
+        n = 0, t0 = t, s0 = s;
+    }
 }
 
 static void x_Flip(void) {

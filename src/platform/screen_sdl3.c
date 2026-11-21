@@ -225,17 +225,37 @@ static void blit(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *src, int sw, int sh,
     SDL_BlitGPUTexture(cmd, &bi);
 }
 
-/* Hold to the frame rate the game was made for (JOYRIDE_MAX_FPS, default
- * 60; 0 = as fast as it goes): GTA moves a step per frame. The machine is
- * given up while waiting so timer callbacks run. */
-static void pace(void) {
+/* No more frames than the display shows (JOYRIDE_MAX_FPS, default the
+ * display's refresh rate, else 60; 0 = as fast as it goes). The game's own
+ * frames come at its 23.3 a second; smooth.c's frames between them fill
+ * up to this. With the game's limiter off (F8) it moves a step a frame, so
+ * this is then its speed. The machine is given up while waiting so timer
+ * callbacks run. */
+static int display_hz(void) {
+    if (!g_win) return 60;
+    const SDL_DisplayMode *dm = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(g_win));
+    return dm && dm->refresh_rate >= 30.0f ? (int)(dm->refresh_rate + 0.5f) : 60;
+}
+
+static int g_fps_env = -1;               /* JOYRIDE_MAX_FPS given */
+
+/* the cap now: the display's rate while smooth.c draws between steps; 60
+ * otherwise (menus and the limiter off move a step a frame) */
+static int cap_fps(void) {
     if (g_max_fps < 0) {
         const char *e = getenv("JOYRIDE_MAX_FPS");
-        g_max_fps = e ? atoi(e) : 60;
+        g_fps_env = e != NULL;
+        g_max_fps = e ? atoi(e) : display_hz();
     }
+    if (g_fps_env || joyride_smooth_running()) return g_max_fps;
+    return g_max_fps > 60 ? 60 : g_max_fps;
+}
+
+static void pace(void) {
+    int fps = cap_fps();
     uint64_t now = SDL_GetTicksNS();
-    if (g_max_fps > 0 && g_last_flip_ns) {
-        uint64_t due = g_last_flip_ns + 1000000000ull / (uint64_t)g_max_fps;
+    if (fps > 0 && g_last_flip_ns) {
+        uint64_t due = g_last_flip_ns + 1000000000ull / (uint64_t)fps;
         if (now < due && due - now < 1000000000ull) {
             hle_block_begin();
             SDL_DelayPrecise(due - now);
@@ -246,6 +266,13 @@ static void pace(void) {
     g_last_flip_ns = now;
 }
 
+/* the earliest a paced flip will reach the screen (smooth.c plans by it) */
+uint64_t joyride_screen_next_slot(void) {
+    int fps = cap_fps();
+    if (fps <= 0 || !g_last_flip_ns) return 0;
+    return g_last_flip_ns + 1000000000ull / (uint64_t)fps;
+}
+
 static void present(int flip) {
     const uint8_t *px;
     const uint32_t *pal = NULL;
@@ -253,6 +280,7 @@ static void present(int flip) {
     unsigned seq = 0;
     if (!hle_dd_frame(&px, &w, &h, &pitch, &bpp, &pal, &seq) &&
         !hle_gdi_window_frame(&px, &w, &h, &pitch, &bpp, &seq)) return;
+    if (flip && joyride_smooth_skip()) return;           /* smooth.c draws this moment itself */
     uint32_t now = hle_ticks_ms();
     if (!flip && !g_force && seq == g_shown_seq && now - g_last_present < 250) return;
     if (!flip && !g_force && now - g_last_present < 15) return;

@@ -23,12 +23,19 @@ void joyride_display_apply(void);
 void joyride_display_current(int *w, int *h);
 int  joyride_display_valid(int w, int h);
 
+/* frames between the game's steps (smooth.c) */
+extern int joyride_smooth;
+void joyride_smooth_wait(void);
+int  joyride_smooth_skip(void);               /* the presenter: leave this flip out */
+int  joyride_smooth_running(void);            /* drawing between steps now */
+
 /* the in-game settings overlay (src/platform/overlay.c) */
 typedef struct {
     int res_w, res_h;       /* screen size in play, 0 = the game's own (1024x768) */
     int filter;             /* bilinear texture filtering */
     int scaling;            /* presenter scaling mode, index into its list */
     int fullscreen;
+    int smooth;             /* frames between the game's steps (smooth.c) */
 } joyride_settings;
 extern joyride_settings joyride_cfg;
 void joyride_config_load(const char *path);   /* then the JOYRIDE_* overrides */
@@ -43,6 +50,7 @@ int  joyride_screen_scaling(int set);          /* set < 0: just read */
 const char *joyride_screen_scaling_name(int i); /* NULL past the last */
 int  joyride_screen_fullscreen(int set);
 void joyride_screen_refresh(void);             /* show the current frame again */
+uint64_t joyride_screen_next_slot(void);       /* when a paced flip can next show (SDL ns) */
 void joyride_screen_key(int sdl_scancode, int down);   /* as if from the keyboard */
 
 /* 1 while joyride's Flip marks the primary (src/platform/screen_sdl3.c) */

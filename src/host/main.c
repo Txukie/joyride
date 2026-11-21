@@ -60,7 +60,8 @@ static void joyride_seed_registry(void) {
 
 /* ---- developer switches ------------------------------------------------
  * JOYRIDE_DUMP=<dir>        save the shown frame as <dir>/frame_NNNN.ppm, once a second
- *                           (JOYRIDE_DUMP_EVERY_MS=<ms> changes the interval; 0 = every frame)
+ *                           (JOYRIDE_DUMP_EVERY_MS=<ms> changes the interval; 0 = every frame,
+ *                           JOYRIDE_DUMP_FROM=<s> starts at that time)
  * JOYRIDE_QUIT_AFTER=<sec>  exit after that many seconds (scripted runs) */
 static const char *g_dump_dir;
 static uint32_t g_quit_after_ms, g_start_ms;
@@ -139,7 +140,9 @@ static void frame_hook(const uint8_t *px, int w, int h, int pitch, int bpp) {
     static int n;
     static int every = -1;
     if (every < 0) every = getenv("JOYRIDE_DUMP_EVERY_MS") ? atoi(getenv("JOYRIDE_DUMP_EVERY_MS")) : 1000;
-    if (!g_dump_dir || (last && now - last < (uint32_t)every)) return;
+    static int from_ms = -1;                         /* JOYRIDE_DUMP_FROM=<s>: start saving then */
+    if (from_ms < 0) from_ms = getenv("JOYRIDE_DUMP_FROM") ? (int)(atof(getenv("JOYRIDE_DUMP_FROM")) * 1000) : 0;
+    if (!g_dump_dir || now - g_start_ms < (uint32_t)from_ms || (last && now - last < (uint32_t)every)) return;
     last = now;
     const uint32_t *pal = NULL;
     const uint8_t *p2; int w2, h2, pitch2, bpp2; unsigned seq;
@@ -254,6 +257,7 @@ int main(int argc, char **argv) {
     snprintf(cfgfile, sizeof cfgfile, "%s/../joyride.cfg", overlay);
     joyride_config_load(cfgfile);
     joyride_texfilter = (uint32_t)joyride_cfg.filter;
+    joyride_smooth = joyride_cfg.smooth;
     joyride_screen_scaling(joyride_cfg.scaling);
     if (joyride_cfg.fullscreen && !headless) joyride_screen_fullscreen(1);
 
