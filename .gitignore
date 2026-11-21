@@ -1,0 +1,31 @@
+# Build output
+build/
+build-*/
+compile_commands.json
+
+# Game files: never commit (bring your own copy)
+game_data/
+iso/
+*.exe
+*.dll
+*.EXE
+*.DLL
+*.rar
+*.mdf
+*.mds
+*.iso
+*.wav
+*.WAV
+
+# Code generated from the original executable: never commit
+gen/
+recomp/gen/
+
+# Local traces and captures
+traces/
+*.bmp
+
+# Tooling noise
+__pycache__/
+.DS_Store
+*.swp
