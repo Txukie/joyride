@@ -82,6 +82,9 @@ for _a in (0x0043BB30, 0x0043C9C3):
                     "MEM32(ecx + 0x24) = joyride_view_scale(MEM32(ecx + 0xC), edi, edx); }")
 TEXAFTER[0x0046456E] = ("{ extern int joyride_square_pixels(void); "
                         "if (joyride_square_pixels()) MEM8(ecx + 0x74F18C) = 0; }")
+# The frame's safe point (src/platform/overlay.c): the frame limiter's first
+# instruction, 0x47DC80 `mov al, byte ptr [0x502f34]`, once a frame in play.
+TEXAFTER[0x0047DC80] = "{ extern void joyride_safe_point(void); joyride_safe_point(); }"
 # MGL's mode size lookup (0x48B770), right after it stores the height
 # (0x48BFE2 `mov [ecx], ebx`; the width went to [[esp + 0x420]]).
 TEXAFTER[0x0048BFE2] = ("{ extern void joyride_mode_size(uint32_t, uint32_t); "
@@ -106,7 +109,7 @@ def process(path: str) -> int:
                 added += 1
         out.append(line)
         a = ADDR.search(line)
-        if a and int(a.group(1), 16) in TEXAFTER and line.lstrip().startswith(("SET_HI8", "SET_LO8(eax, MEM8(0x503224))", "esp = esp + 0x10u", "MEM32(ecx) = ebx", "MEM32(ecx + 0x24) = edx", "MEM8(ecx + 0x74F18C)", "edx =", "esi =", "PUSH32(esp, ebp)")):
+        if a and int(a.group(1), 16) in TEXAFTER and line.lstrip().startswith(("SET_HI8", "SET_LO8(eax, MEM8(0x503224))", "SET_LO8(eax, MEM8(0x502F34))", "esp = esp + 0x10u", "MEM32(ecx) = ebx", "MEM32(ecx + 0x24) = edx", "MEM8(ecx + 0x74F18C)", "edx =", "esi =", "PUSH32(esp, ebp)")):
             nxt = lines[i + 1] if i + 1 < len(lines) else ""
             if "joyride_" not in nxt:
                 indent = line[:len(line) - len(line.lstrip())]

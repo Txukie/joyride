@@ -67,14 +67,13 @@ static uint32_t g_quit_after_ms, g_start_ms;
 
 /* JOYRIDE_KEYS="4:RETURN,6.5:DOWN,10:UP:3": press a key at each time in
  * seconds and release it 120 ms later, or after the given seconds. */
-static const struct { const char *name; uint32_t vk, scan; } KEYNAMES[] = {
-    {"RETURN", 0x0D, 0x1C}, {"ESCAPE", 0x1B, 0x01}, {"SPACE", 0x20, 0x39},
-    {"UP", 0x26, 0x148}, {"DOWN", 0x28, 0x150}, {"LEFT", 0x25, 0x14B}, {"RIGHT", 0x27, 0x14D},
-    {"CTRL", 0x11, 0x1D}, {"TAB", 0x09, 0x0F}, {"Z", 0x5A, 0x2C}, {"X", 0x58, 0x2D},
-    {"F8", 0x77, 0x42}, {"F9", 0x78, 0x43}, {"F10", 0x79, 0x44},
+/* by SDL scancode: the keys go where the keyboard's go (overlay, then game) */
+static const struct { const char *name; int sdl; } KEYNAMES[] = {
+    {"RETURN", 40}, {"ESCAPE", 41}, {"SPACE", 44}, {"UP", 82}, {"DOWN", 81}, {"LEFT", 80}, {"RIGHT", 79},
+    {"CTRL", 224}, {"TAB", 43}, {"Z", 29}, {"X", 27}, {"F8", 65}, {"F9", 66}, {"F10", 67}, {"F12", 69},
 };
 #define MAX_SCRIPT 64
-static struct { uint32_t at_ms, hold_ms, vk, scan; int state; } g_script[MAX_SCRIPT];
+static struct { uint32_t at_ms, hold_ms; int sdl, state; } g_script[MAX_SCRIPT];
 static int g_script_n;
 
 static void parse_keys(const char *spec) {
@@ -90,8 +89,7 @@ static void parse_keys(const char *spec) {
         for (size_t k = 0; k < sizeof KEYNAMES / sizeof KEYNAMES[0]; k++)
             if (!strcasecmp(colon + 1, KEYNAMES[k].name)) {
                 g_script[g_script_n].at_ms = (uint32_t)(atof(tok) * 1000.0);
-                g_script[g_script_n].vk = KEYNAMES[k].vk;
-                g_script[g_script_n].scan = KEYNAMES[k].scan;
+                g_script[g_script_n].sdl = KEYNAMES[k].sdl;
                 g_script[g_script_n].hold_ms = hold;
                 g_script_n++;
             }
@@ -101,12 +99,12 @@ static void parse_keys(const char *spec) {
 static void run_script(uint32_t t) {
     for (int i = 0; i < g_script_n; i++) {
         if (g_script[i].state == 0 && t >= g_script[i].at_ms) {
-            hle_input_key(1, g_script[i].vk, g_script[i].scan);
+            fprintf(stderr, "[joyride] t=%.1fs key %d\n", t / 1000.0, g_script[i].sdl);
             g_script[i].state = 1;
-            fprintf(stderr, "[joyride] t=%.1fs key vk 0x%02X\n", t / 1000.0, g_script[i].vk);
+            joyride_screen_key(g_script[i].sdl, 1);
         } else if (g_script[i].state == 1 && t >= g_script[i].at_ms + g_script[i].hold_ms) {
-            hle_input_key(0, g_script[i].vk, g_script[i].scan);
             g_script[i].state = 2;
+            joyride_screen_key(g_script[i].sdl, 0);
         }
     }
 }
@@ -146,10 +144,16 @@ static void frame_hook(const uint8_t *px, int w, int h, int pitch, int bpp) {
     const uint32_t *pal = NULL;
     const uint8_t *p2; int w2, h2, pitch2, bpp2; unsigned seq;
     if (bpp == 8) hle_dd_frame(&p2, &w2, &h2, &pitch2, &bpp2, &pal, &seq);
+    uint32_t *shown = NULL;                          /* with the overlay drawn, when it is open */
+    if (joyride_overlay_open() && bpp == 32 && (shown = malloc((size_t)w * (size_t)h * 4))) {
+        for (int y = 0; y < h; y++) memcpy(shown + (size_t)y * (size_t)w, px + (size_t)y * (size_t)pitch, (size_t)w * 4);
+        joyride_overlay_draw(shown, w, h);
+        px = (const uint8_t *)shown, pitch = w * 4;
+    }
     char path[PATH_MAX];
     snprintf(path, sizeof path, "%s/frame_%04d.ppm", g_dump_dir, n++);
     FILE *f = fopen(path, "wb");
-    if (!f) return;
+    if (!f) { free(shown); return; }
     fprintf(f, "P6\n%d %d\n255\n", w, h);
     for (int y = 0; y < h; y++) {
         const uint8_t *row = px + (size_t)y * (size_t)pitch;
@@ -171,6 +175,7 @@ static void frame_hook(const uint8_t *px, int w, int h, int pitch, int bpp) {
         }
     }
     fclose(f);
+    free(shown);
 }
 
 static void overlay_dir(char *out, size_t n) {
@@ -217,7 +222,6 @@ int main(int argc, char **argv) {
     win32hle_register(joyride_smack);
     win32hle_register(joyride_ddraw);
     win32hle_register(joyride_dplay);
-    joyride_texfilter_init();
     recomp_host_init();
 
     g_dump_dir = getenv("JOYRIDE_DUMP");
@@ -243,6 +247,16 @@ int main(int argc, char **argv) {
         return 69;
     }
 
+    /* Settings (the F12 overlay keeps them): joyride.cfg beside the overlay
+     * directory, then the JOYRIDE_* overrides. After the screen is up, for
+     * JOYRIDE_RES=desktop. */
+    char cfgfile[PATH_MAX + 32];
+    snprintf(cfgfile, sizeof cfgfile, "%s/../joyride.cfg", overlay);
+    joyride_config_load(cfgfile);
+    joyride_texfilter = (uint32_t)joyride_cfg.filter;
+    joyride_screen_scaling(joyride_cfg.scaling);
+    if (joyride_cfg.fullscreen && !headless) joyride_screen_fullscreen(1);
+
     /* The registry persists in the overlay (win32hle writes it back on
      * change). GTA Settings.exe normally creates the game's key; seed it
      * with defaults the first time so the game starts without it. */
@@ -253,7 +267,7 @@ int main(int argc, char **argv) {
     if (fresh) joyride_seed_registry();
     int rc = strict ? recomp_host_boot(exe) : recomp_host_boot_permissive(exe);
     if (rc) { fprintf(stderr, "joyride: boot failed (%d)\n", rc); return 70; }
-    joyride_display_setup();
+    joyride_display_setup(joyride_cfg.res_w, joyride_cfg.res_h);
 
     /* The 2002 release ships with its intro movie switched off: the flag the
      * movie player checks (0x4AC06C, "skip the movie") starts at 1 in the

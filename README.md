@@ -25,22 +25,27 @@ off, any key skips it).
 
 Network play works between joyride instances (see below).
 
-Bilinear texture filtering, the 3dfx version's look, is on by default in
-32-bit colour modes (F10 toggles, `JOYRIDE_FILTER=0` starts with it off);
-see [`docs/exe-3dfx.md`](docs/exe-3dfx.md).
+### Settings (F12)
 
-### Screen size
+**F12** opens joyride's settings over the game (in play the game pauses
+while it is open). Up/Down pick, Left/Right change, Enter applies a screen
+size, F12 or Esc closes. They are kept in `~/.local/share/joyride/joyride.cfg`.
 
-The game plays at 1024×768 on its own. `JOYRIDE_RES=<width>x<height>` (or
-`JOYRIDE_RES=desktop`) plays at another size, widescreen and ultrawide
-included: the view keeps the game's zoom from top to bottom and shows more
-of the city to the sides, instead of the game's own behaviour of zooming in.
-Sizes from 640×480 to 3840×1600 that joyride's display list offers (the
-common 4:3, 16:9, 16:10 and 21:9 sizes, and your desktop's); the log lists
-the game's modes. Menus stay 640×480.
+* **Screen size** — the game plays at 1024×768 on its own; any size joyride
+  offers from 640×480 to 3840×1600 (the common 4:3, 16:9, 16:10 and 21:9
+  sizes, and your desktop's), changed in play. Wider screens show more of
+  the city to the sides at the game's usual zoom, instead of the game's own
+  behaviour of zooming in. Menus stay 640×480.
+* **Textures** — bilinear filtering, the 3dfx version's look (default), or
+  sharp; see [`docs/exe-3dfx.md`](docs/exe-3dfx.md). 32-bit colour only.
+* **Scaling** of the picture to the window: sharp (default), smooth,
+  nearest, integer.
+* **Fullscreen** (also F11 or Alt+Enter).
 
 The renderer is software, as in the original: up to 2560×1440 runs at full
-speed with filtering; 3440×1440 needs filtering off (F10) to keep it.
+speed with filtering; 3440×1440 needs sharp textures to keep it.
+`JOYRIDE_RES=<w>x<h>|desktop|game`, `JOYRIDE_FILTER=0|1` and
+`JOYRIDE_SCALE=<mode>` override the file for one run.
 
 Not yet: Windows and macOS builds.
 
@@ -65,9 +70,8 @@ joyride plays with joyride, not with the original Windows game.
 
 | Key | |
 | --- | --- |
-| F10 | texture filtering: bilinear (default) or off |
+| F12 | settings: screen size, textures, scaling, fullscreen |
 | F11, Alt+Enter | fullscreen |
-| F12 | scaling: sharp (default), smooth, nearest, integer |
 | Esc, then Enter | quit (the game's own menu); closing the window twice also quits |
 
 ## Approach
@@ -99,7 +103,7 @@ Nothing in the install is modified: saves, settings and the registry go to
 `~/.local/share/joyride/overlay`. Developer switches: `JOYRIDE_HEADLESS=1`,
 `JOYRIDE_DUMP=<dir>` (one frame per second as PPM), `JOYRIDE_QUIT_AFTER=<s>`,
 `JOYRIDE_KEYS="4:RETURN,15:UP:6"` (key presses, or holds, at times in seconds),
-`JOYRIDE_MAX_FPS` (default 60, 0 = unlimited), `JOYRIDE_SCALE=sharp|smooth|nearest|integer`,
+`JOYRIDE_MAX_FPS` (default 60, 0 = unlimited),
 `JOYRIDE_GPU_DEBUG=1` (SDL_GPU validation), `JOYRIDE_FPS=1` (the game's frame
 rate every 5 s; it should hold 23.3).
 

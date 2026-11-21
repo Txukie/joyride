@@ -104,13 +104,13 @@ The differences: filtering happens at the game's own resolution (the
 Windows exe offers up to 1024×768 itself), and cut-outs follow the original
 texels instead of a filtered alpha threshold.
 
-F10 toggles it; `JOYRIDE_FILTER=0` starts with it off. The blend is two
+The F12 settings overlay switches it (`JOYRIDE_FILTER=0|1` for one run). The blend is two
 packed 32-bit lerps per row and one between rows, with the four texels'
 colours cached while consecutive pixels share them. Up to 2560×1440
 (`JOYRIDE_RES`, see `src/hle/display.c`) the game keeps its 23.3 fps (a
 70 Hz Miles timer, 3 ticks a frame); at 3440×1440 filtering costs about a
 quarter of that, and since the game's speed is tied to its frame rate,
-F10 off is the way to play there.
+sharp textures are the way to play there.
 
 Not done yet:
 

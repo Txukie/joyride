@@ -20,14 +20,14 @@
  * cut-out edges keep their original shape and never pick up a dark fringe.
  *
  * 32-bit colour only: in 8-bit modes a blend has no palette entry, and the
- * 16-bit loops are not hooked yet. F10 toggles (JOYRIDE_FILTER=0 starts off).
+ * 16-bit loops are not hooked yet. The F12 overlay switches it (overlay.c).
  */
 #include <stdint.h>
 #include <stdlib.h>
 
 #include "joyride_hle.h"
 
-uint32_t joyride_texfilter = 1;     /* read by the spliced code; F10 toggles */
+uint32_t joyride_texfilter = 1;     /* read by the spliced code; the overlay sets it */
 uint32_t joyride_texc;              /* the blend, from fetch to colour load */
 uint32_t joyride_texclamp = 1;      /* 1: world tile (64x64), 0: sprite (whole page) */
 
@@ -112,7 +112,4 @@ void joyride_tex_begin(uint32_t tile) {
     g_key = ~0u;
 }
 
-void joyride_texfilter_init(void) {
-    const char *e = getenv("JOYRIDE_FILTER");
-    if (e && *e == '0') joyride_texfilter = 0;
-}
+

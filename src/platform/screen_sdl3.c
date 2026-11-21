@@ -8,11 +8,11 @@
  * onto the window's swapchain with SDL_BlitGPUTexture. SDL_GPU picks Vulkan,
  * Metal or Direct3D 12 for the platform. No shaders are involved yet.
  *
- * Scaling (F12 cycles): sharp (nearest to an integer multiple, then linear
+ * Scaling: sharp (nearest to an integer multiple, then linear
  * to the window: crisp pixels without uneven ones), smooth (linear),
  * nearest, integer (largest whole multiple that fits, black around).
- * F10: bilinear texture filtering on/off (src/hle/texfilter.c).
- * F11 or Alt+Enter: fullscreen. Closing the window asks the game to quit
+ * F12: the settings overlay (src/platform/overlay.c), which holds these and
+ * the screen size and texture filtering. F11 or Alt+Enter: fullscreen. Closing the window asks the game to quit
  * (WM_CLOSE); asking again quits outright.
  *
  * The key tables (vk_of, scan_of) follow screen.c's.
@@ -68,6 +68,7 @@ static uint32_t g_last_present;
 static pthread_t g_video_thread;
 static int g_max_fps = -1;
 static uint64_t g_last_flip_ns;
+static int g_force;                      /* the next present shows the frame even if unchanged */
 
 /* ---- keys -------------------------------------------------------------- */
 
@@ -253,13 +254,15 @@ static void present(int flip) {
     if (!hle_dd_frame(&px, &w, &h, &pitch, &bpp, &pal, &seq) &&
         !hle_gdi_window_frame(&px, &w, &h, &pitch, &bpp, &seq)) return;
     uint32_t now = hle_ticks_ms();
-    if (!flip && seq == g_shown_seq && now - g_last_present < 250) return;
-    if (!flip && now - g_last_present < 15) return;
+    if (!flip && !g_force && seq == g_shown_seq && now - g_last_present < 250) return;
+    if (!flip && !g_force && now - g_last_present < 15) return;
+    g_force = 0;
     g_shown_seq = seq, g_last_present = now;
     g_src_w = w, g_src_h = h;
     if (hle_screen_frame_hook) hle_screen_frame_hook(px, w, h, pitch, bpp);
     if (flip) pace();
     if (!g_gpu || !convert(px, w, h, pitch, bpp, pal) || !ensure_resources(w, h)) return;
+    joyride_overlay_draw(g_bgra, w, h);
 
     void *map = SDL_MapGPUTransferBuffer(g_gpu, g_upload, true);
     if (!map) return;
@@ -310,6 +313,16 @@ static void primary_changed(void) {
 }
 static void present_gdi(void) { present(0); }
 
+/* the overlay asks: show the frame again (with the overlay as it is now) */
+void joyride_screen_refresh(void) {
+    static int busy;                      /* a script key from inside present */
+    if (busy || (!g_headless && !pthread_equal(pthread_self(), g_video_thread))) return;
+    busy = 1;
+    g_force = 1;
+    present(0);
+    busy = 0;
+}
+
 /* ---- input ------------------------------------------------------------- */
 
 /* window coordinates (points) -> game pixels, clamped to the picture */
@@ -330,6 +343,40 @@ static void set_fullscreen(int on) {
     if (g_win) { if (on) SDL_HideCursor(); else SDL_ShowCursor(); }
 }
 
+int joyride_screen_scaling(int set) {
+    if (set >= 0 && set < MODE_COUNT) { g_mode = set; g_shown_seq = ~0u; }
+    return g_mode;
+}
+const char *joyride_screen_scaling_name(int i) { return i >= 0 && i < MODE_COUNT ? k_modes[i] : NULL; }
+int joyride_screen_fullscreen(int set) {
+    if (set >= 0 && set != g_fullscreen) set_fullscreen(set);
+    return g_fullscreen;
+}
+
+/* A key, from the keyboard or a script (joyride_screen_key): the overlay,
+ * joyride's own keys, then the game. */
+static void key_event(SDL_Scancode sc, int down, int repeat, SDL_Keymod mod) {
+    if (hle_screen_key_hook && hle_screen_key_hook((int)sc, down)) return;
+    if (joyride_overlay_open() && down && sc != SDL_SCANCODE_F11 &&
+        joyride_overlay_key((int)sc, down, repeat)) return;
+    if ((sc == SDL_SCANCODE_RETURN && (mod & SDL_KMOD_ALT)) || sc == SDL_SCANCODE_F11) {
+        if (down && !repeat) {
+            set_fullscreen(!g_fullscreen);
+            joyride_cfg.fullscreen = g_fullscreen;
+            joyride_config_save();
+            if (joyride_overlay_open()) joyride_screen_refresh();
+        }
+        return;
+    }
+    if (sc == SDL_SCANCODE_F12 || joyride_overlay_open()) {
+        if (joyride_overlay_key((int)sc, down, repeat)) return;
+    }
+    int vk = vk_of(sc);
+    if (vk) hle_input_key(down, (uint32_t)vk, scan_of(sc));
+}
+
+void joyride_screen_key(int sdl_scancode, int down) { key_event((SDL_Scancode)sdl_scancode, down, 0, 0); }
+
 void hle_screen_pump(void) {
     SDL_Event e;
     while (g_win && SDL_PollEvent(&e)) {
@@ -341,33 +388,9 @@ void hle_screen_pump(void) {
             else hle_exit(0);                            /* asked twice, or no window to ask */
             break;
         }
-        case SDL_EVENT_KEY_DOWN: case SDL_EVENT_KEY_UP: {
-            SDL_Scancode sc = e.key.scancode;
-            int down = e.type == SDL_EVENT_KEY_DOWN;
-            if (hle_screen_key_hook && hle_screen_key_hook((int)sc, down)) break;
-            if ((sc == SDL_SCANCODE_RETURN && (e.key.mod & SDL_KMOD_ALT)) || sc == SDL_SCANCODE_F11) {
-                if (down && !e.key.repeat) set_fullscreen(!g_fullscreen);
-                break;
-            }
-            if (sc == SDL_SCANCODE_F10) {
-                if (down && !e.key.repeat) {
-                    joyride_texfilter = !joyride_texfilter;
-                    fprintf(stderr, "[screen] texture filtering: %s\n", joyride_texfilter ? "bilinear" : "off");
-                }
-                break;
-            }
-            if (sc == SDL_SCANCODE_F12) {
-                if (down && !e.key.repeat) {
-                    g_mode = (g_mode + 1) % MODE_COUNT;
-                    fprintf(stderr, "[screen] scaling: %s\n", k_modes[g_mode]);
-                    g_shown_seq = ~0u;
-                }
-                break;
-            }
-            int vk = vk_of(sc);
-            if (vk) hle_input_key(down, (uint32_t)vk, scan_of(sc));
+        case SDL_EVENT_KEY_DOWN: case SDL_EVENT_KEY_UP:
+            key_event(e.key.scancode, e.type == SDL_EVENT_KEY_DOWN, e.key.repeat, e.key.mod);
             break;
-        }
         case SDL_EVENT_MOUSE_MOTION: {
             int gx, gy;
             to_game(e.motion.x, e.motion.y, &gx, &gy);
@@ -436,10 +459,9 @@ int hle_screen_open(const char *title, int fullscreen, int headless) {
                           ? SDL_GPU_PRESENTMODE_MAILBOX : SDL_GPU_PRESENTMODE_VSYNC;
     SDL_SetGPUSwapchainParameters(g_gpu, g_win, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, pm);
     if (fullscreen) SDL_HideCursor();
-    fprintf(stderr, "[screen] SDL %d.%d.%d, %s video, SDL_GPU on %s, %s present, scaling %s (F12), fullscreen F11, filtering %s (F10)\n",
+    fprintf(stderr, "[screen] SDL %d.%d.%d, %s video, SDL_GPU on %s, %s present, F12 settings, F11 fullscreen\n",
             SDL_VERSIONNUM_MAJOR(SDL_GetVersion()), SDL_VERSIONNUM_MINOR(SDL_GetVersion()),
             SDL_VERSIONNUM_MICRO(SDL_GetVersion()), SDL_GetCurrentVideoDriver(), SDL_GetGPUDeviceDriver(g_gpu),
-            pm == SDL_GPU_PRESENTMODE_MAILBOX ? "mailbox" : "vsync", k_modes[g_mode],
-            joyride_texfilter ? "bilinear" : "off");
+            pm == SDL_GPU_PRESENTMODE_MAILBOX ? "mailbox" : "vsync");
     return 0;
 }
