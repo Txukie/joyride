@@ -34,3 +34,10 @@ The game data is identical between the original CD and the Steam release
 | --- | --- | --- |
 | Original CD (1997) | `GTAWIN/Grand Theft Auto.exe` | CD audio tracks 2–11 |
 | Steam | not yet supported (2002 rebuild) | `Music/Track1–10.wav` |
+
+## License
+
+joyride's own source code is released under the [MIT License](LICENSE).
+This covers only the code in this repository — not the original game, its
+executable or data, nor any code generated from that executable, which remain
+the property of their respective rights holders.
