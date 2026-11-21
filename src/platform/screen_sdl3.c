@@ -11,6 +11,7 @@
  * Scaling (F12 cycles): sharp (nearest to an integer multiple, then linear
  * to the window: crisp pixels without uneven ones), smooth (linear),
  * nearest, integer (largest whole multiple that fits, black around).
+ * F10: bilinear texture filtering on/off (src/hle/texfilter.c).
  * F11 or Alt+Enter: fullscreen. Closing the window asks the game to quit
  * (WM_CLOSE); asking again quits outright.
  *
@@ -348,6 +349,13 @@ void hle_screen_pump(void) {
                 if (down && !e.key.repeat) set_fullscreen(!g_fullscreen);
                 break;
             }
+            if (sc == SDL_SCANCODE_F10) {
+                if (down && !e.key.repeat) {
+                    joyride_texfilter = !joyride_texfilter;
+                    fprintf(stderr, "[screen] texture filtering: %s\n", joyride_texfilter ? "bilinear" : "off");
+                }
+                break;
+            }
             if (sc == SDL_SCANCODE_F12) {
                 if (down && !e.key.repeat) {
                     g_mode = (g_mode + 1) % MODE_COUNT;
@@ -428,9 +436,10 @@ int hle_screen_open(const char *title, int fullscreen, int headless) {
                           ? SDL_GPU_PRESENTMODE_MAILBOX : SDL_GPU_PRESENTMODE_VSYNC;
     SDL_SetGPUSwapchainParameters(g_gpu, g_win, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, pm);
     if (fullscreen) SDL_HideCursor();
-    fprintf(stderr, "[screen] SDL %d.%d.%d, %s video, SDL_GPU on %s, %s present, scaling %s (F12), fullscreen F11\n",
+    fprintf(stderr, "[screen] SDL %d.%d.%d, %s video, SDL_GPU on %s, %s present, scaling %s (F12), fullscreen F11, filtering %s (F10)\n",
             SDL_VERSIONNUM_MAJOR(SDL_GetVersion()), SDL_VERSIONNUM_MINOR(SDL_GetVersion()),
             SDL_VERSIONNUM_MICRO(SDL_GetVersion()), SDL_GetCurrentVideoDriver(), SDL_GetGPUDeviceDriver(g_gpu),
-            pm == SDL_GPU_PRESENTMODE_MAILBOX ? "mailbox" : "vsync", k_modes[g_mode]);
+            pm == SDL_GPU_PRESENTMODE_MAILBOX ? "mailbox" : "vsync", k_modes[g_mode],
+            joyride_texfilter ? "bilinear" : "off");
     return 0;
 }

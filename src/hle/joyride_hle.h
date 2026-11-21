@@ -11,6 +11,10 @@ extern const win32hle_shim joyride_dplay[];   /* dplayx.dll (DirectPlay) */
 
 void joyride_dplay_shutdown(void);           /* close any network session (dplay.c) */
 
+/* bilinear texture filtering (texfilter.c): on/off, and the env setup */
+extern uint32_t joyride_texfilter;
+void joyride_texfilter_init(void);
+
 /* 1 while joyride's Flip marks the primary (src/platform/screen_sdl3.c) */
 extern int joyride_flipping;
 

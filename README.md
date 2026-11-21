@@ -25,6 +25,10 @@ off, any key skips it).
 
 Network play works between joyride instances (see below).
 
+Bilinear texture filtering, the 3dfx version's look, is on by default in
+32-bit colour modes (F10 toggles, `JOYRIDE_FILTER=0` starts with it off);
+see [`docs/exe-3dfx.md`](docs/exe-3dfx.md).
+
 Not yet: Windows and macOS builds.
 
 ### Network play
@@ -48,6 +52,7 @@ joyride plays with joyride, not with the original Windows game.
 
 | Key | |
 | --- | --- |
+| F10 | texture filtering: bilinear (default) or off |
 | F11, Alt+Enter | fullscreen |
 | F12 | scaling: sharp (default), smooth, nearest, integer |
 | Esc, then Enter | quit (the game's own menu); closing the window twice also quits |

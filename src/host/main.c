@@ -216,6 +216,7 @@ int main(int argc, char **argv) {
     win32hle_register(joyride_smack);
     win32hle_register(joyride_ddraw);
     win32hle_register(joyride_dplay);
+    joyride_texfilter_init();
     recomp_host_init();
 
     g_dump_dir = getenv("JOYRIDE_DUMP");
