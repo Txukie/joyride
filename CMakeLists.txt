@@ -23,10 +23,10 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
 
-find_package(PkgConfig REQUIRED)
-# Bring-up uses win32hle's SDL2 screen/audio (on Linux, sdl2-compat runs it on
-# SDL3). The SDL3 + SDL_GPU presenter replaces it in a later milestone.
-pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2 SDL2_ttf)
+# SDL3 for the window, input, audio and SDL_GPU presenting; SDL3_ttf for the
+# TrueType text win32hle's GDI draws.
+find_package(SDL3 REQUIRED CONFIG)
+find_package(SDL3_ttf REQUIRED CONFIG)
 find_package(Threads REQUIRED)
 
 # Guest memory: one 4 GB block at this host address; ADDR(va) adds it as a constant.
@@ -38,14 +38,20 @@ target_include_directories(joyride_gen PRIVATE "${PCRECOMP}/runtime/recomp32" "$
 target_compile_definitions(joyride_gen PRIVATE ${JOYRIDE_DEFS})
 target_compile_options(joyride_gen PRIVATE -O1 -w -include "${JOYRIDE_GEN_DIR}/recomp_funcs.h")
 
-# --- pcrecomp's Win32 layer (everything but its selftests and the macOS Metal path)
+# --- pcrecomp's Win32 layer, minus its selftests and the four files that use
+# SDL2: screen.c and present.c are replaced by joyride's SDL3/SDL_GPU screen,
+# gdidc.c and dsound.c by SDL3 ports of themselves (src/platform/).
 file(GLOB WIN32HLE_SOURCES "${PCRECOMP}/runtime/win32hle/*.c")
-list(FILTER WIN32HLE_SOURCES EXCLUDE REGEX "_selftest\\.c$")
-add_library(win32hle STATIC ${WIN32HLE_SOURCES})
+list(FILTER WIN32HLE_SOURCES EXCLUDE REGEX "(_selftest|/screen|/present|/gdidc|/dsound)\\.c$")
+add_library(win32hle STATIC ${WIN32HLE_SOURCES}
+    src/platform/screen_sdl3.c
+    src/platform/gdidc_sdl3.c
+    src/platform/dsound_sdl3.c)
+target_include_directories(win32hle PRIVATE src/hle)
 target_include_directories(win32hle PUBLIC "${PCRECOMP}/runtime/win32hle" "${PCRECOMP}/runtime/recomp32")
 target_compile_definitions(win32hle PUBLIC ${JOYRIDE_DEFS})
 target_compile_options(win32hle PRIVATE -w)
-target_link_libraries(win32hle PUBLIC PkgConfig::SDL2 Threads::Threads m)
+target_link_libraries(win32hle PUBLIC SDL3::SDL3 SDL3_ttf::SDL3_ttf Threads::Threads m)
 
 # --- joyride itself ---------------------------------------------------------
 add_executable(joyride

@@ -16,8 +16,18 @@ against pcrecomp's win32hle Win32 layer plus joyride's own Miles, Smacker and
 DirectDraw additions, and runs the game's own code: its C runtime, `WinMain`,
 SciTech MGL's DirectDraw driver, the front end and the game itself.
 
-Not yet: the intro movie (skipped), sound checked by ear, the SDL3 + SDL_GPU
-presenter (bring-up uses win32hle's SDL2 screen), Windows and macOS builds.
+The platform layer is SDL3 only: window, input and audio through SDL3, the
+picture through SDL_GPU (Vulkan, Metal or Direct3D 12).
+
+Not yet: the intro movie (skipped), Windows and macOS builds.
+
+### Keys
+
+| Key | |
+| --- | --- |
+| F11, Alt+Enter | fullscreen |
+| F12 | scaling: sharp (default), smooth, nearest, integer |
+| Esc, then Enter | quit (the game's own menu); closing the window twice also quits |
 
 ## Approach
 
@@ -36,6 +46,7 @@ presenter (bring-up uses win32hle's SDL2 screen), Windows and macOS builds.
 ```bash
 git clone --recursive https://github.com/Txukie/joyride && cd joyride
 python3 -m venv .venv && .venv/bin/pip install -r tools/requirements.txt
+# needs: CMake, Ninja, a C compiler, SDL3 and SDL3_ttf (development files)
 mkdir -p game_data && cp -r "<your install>/WINO" game_data/
 tools/lift.sh        # writes the generated C to gen/ (never committed)
 cmake -S . -B build -G Ninja && cmake --build build
@@ -45,7 +56,9 @@ build/joyride "<your install>"   # the folder holding WINO/ and GTADATA/
 Nothing in the install is modified: saves, settings and the registry go to
 `~/.local/share/joyride/overlay`. Developer switches: `JOYRIDE_HEADLESS=1`,
 `JOYRIDE_DUMP=<dir>` (one frame per second as PPM), `JOYRIDE_QUIT_AFTER=<s>`,
-`JOYRIDE_KEYS="4:RETURN,7:DOWN"` (key presses at times in seconds).
+`JOYRIDE_KEYS="4:RETURN,15:UP:6"` (key presses, or holds, at times in seconds),
+`JOYRIDE_MAX_FPS` (default 60, 0 = unlimited), `JOYRIDE_SCALE=sharp|smooth|nearest|integer`,
+`JOYRIDE_GPU_DEBUG=1` (SDL_GPU validation).
 
 ## Supported game data
 

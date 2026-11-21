@@ -18,7 +18,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #include "win32hle.h"
 #include "joyride_hle.h"
@@ -71,7 +71,7 @@ static voice_t   g_voice[MAX_SAMPLES];
 static stream_t  g_stream[MAX_STREAMS];
 static atimer_t  g_timer[MAX_TIMERS];
 static pthread_mutex_t g_mix = PTHREAD_MUTEX_INITIALIZER;
-static SDL_AudioDeviceID g_dev;
+static SDL_AudioStream *g_sdl_out;
 static uint32_t g_driver;           /* the one HDIGDRIVER */
 static int g_master = 127;
 static uint64_t g_t0_ms;
@@ -180,8 +180,7 @@ static void mix_stream(stream_t *s, int32_t *out, int frames) {
     }
 }
 
-static void audio_cb(void *ud, Uint8 *stream, int len) {
-    (void)ud;
+static void mix_out(Uint8 *stream, int len) {
     int frames = len / 4;
     int32_t acc[4096 * 2];
     int16_t *o = (int16_t *)stream;
@@ -200,20 +199,28 @@ static void audio_cb(void *ud, Uint8 *stream, int len) {
     }
 }
 
+/* SDL3: a stream that asks for audio as it needs it. */
+static void stream_cb(void *ud, SDL_AudioStream *st, int additional, int total) {
+    (void)ud; (void)total;
+    static Uint8 buf[16384];
+    while (additional > 0) {
+        int n = (additional > (int)sizeof buf ? (int)sizeof buf : additional) & ~3;
+        if (n <= 0) break;
+        mix_out(buf, n);
+        SDL_PutAudioStreamData(st, buf, n);
+        additional -= n;
+    }
+}
+
 static void audio_open(void) {
-    if (g_dev) return;
-    if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
+    if (g_sdl_out) return;
+    if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         fprintf(stderr, "[mss] no audio: %s\n", SDL_GetError());
         return;
     }
-    SDL_AudioSpec want = {0}, have;
-    want.freq = OUT_RATE;
-    want.format = AUDIO_S16SYS;
-    want.channels = 2;
-    want.samples = 1024;
-    want.callback = audio_cb;
-    g_dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
-    if (g_dev) SDL_PauseAudioDevice(g_dev, 0);
+    SDL_AudioSpec want = { SDL_AUDIO_S16, 2, OUT_RATE };
+    g_sdl_out = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &want, stream_cb, NULL);
+    if (g_sdl_out) SDL_ResumeAudioStreamDevice(g_sdl_out);
     else fprintf(stderr, "[mss] no audio device: %s\n", SDL_GetError());
 }
 
@@ -221,13 +228,13 @@ static void audio_open(void) {
 
 static void *timer_thread(void *arg) {
     atimer_t *t = (atimer_t *)arg;
-    uint64_t due = SDL_GetTicks64() * 1000;
+    uint64_t due = SDL_GetTicks() * 1000;
     while (!t->released) {
-        if (!t->running || !t->period_us) { usleep(1000); due = SDL_GetTicks64() * 1000; continue; }
+        if (!t->running || !t->period_us) { usleep(1000); due = SDL_GetTicks() * 1000; continue; }
         due += t->period_us;
-        int64_t wait = (int64_t)due - (int64_t)(SDL_GetTicks64() * 1000);
+        int64_t wait = (int64_t)due - (int64_t)(SDL_GetTicks() * 1000);
         if (wait > 0) usleep((useconds_t)wait);
-        else if (wait < -200000) due = SDL_GetTicks64() * 1000;      /* far behind: no catch-up storm */
+        else if (wait < -200000) due = SDL_GetTicks() * 1000;      /* far behind: no catch-up storm */
         if (t->running && !t->released) {
             uint32_t a[1] = { t->user };
             hle_call_guest(t->callback, 1, a);
@@ -239,14 +246,14 @@ static void *timer_thread(void *arg) {
 
 /* ---- the shims --------------------------------------------------------------- */
 
-static void a_startup(void)  { g_t0_ms = SDL_GetTicks64(); RET(1, 0); }
+static void a_startup(void)  { g_t0_ms = SDL_GetTicks(); RET(1, 0); }
 static void a_shutdown(void) {
     for (int i = 0; i < MAX_TIMERS; i++) if (g_timer[i].used) g_timer[i].released = 1;
-    if (g_dev) { SDL_CloseAudioDevice(g_dev); g_dev = 0; }
+    if (g_sdl_out) { SDL_DestroyAudioStream(g_sdl_out); g_sdl_out = NULL; }
     RET(0, 0);
 }
 static void a_set_preference(void) { RET(0, 2); }            /* (number, value) -> previous */
-static void a_ms_count(void)       { RET((uint32_t)(SDL_GetTicks64() - g_t0_ms), 0); }
+static void a_ms_count(void)       { RET((uint32_t)(SDL_GetTicks() - g_t0_ms), 0); }
 static void a_mem_alloc_lock(void) { RET(hle_va(hle_alloc(A32(0) ? A32(0) : 1)), 1); }
 static void a_mem_free_lock(void)  { if (A32(0)) hle_free(hle_ptr(A32(0))); RET(0, 1); }
 

@@ -1,0 +1,801 @@
+/*
+ * joyride: SDL3 port of pcrecomp's runtime/win32hle/dsound.c (pcrecomp a67767b, MIT,
+ * Copyright (c) 2026 sp00nz). Only the SDL2 / SDL2_ttf calls are changed, so
+ * the rest of win32hle and this file stay in step; diff against the original
+ * to see the port. win32hle links SDL2, which cannot share a binary with
+ * SDL3, so joyride builds these instead of the originals.
+ */
+/*
+ * dsound.c - DirectSound on SDL2 audio: IDirectSound and IDirectSoundBuffer,
+ * with a software mixer.
+ *
+ * A secondary buffer is guest memory the game Locks and writes, as it would
+ * be on Windows; the mixer (SDL's audio thread) reads it at the buffer's
+ * frequency, volume and pan and moves its play cursor in real time, so a
+ * game that streams into a looping buffer by watching GetCurrentPosition
+ * keeps doing so. The primary buffer is only its format: everything is mixed
+ * at the device's rate. One mutex covers the buffers' state, between the
+ * mixer and the shims.
+ *
+ * With no audio device (SDL_AUDIODRIVER=dummy, a headless box) SDL's dummy
+ * driver still runs the callback in real time, so the cursors still move.
+ */
+#define _GNU_SOURCE
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <pthread.h>
+#include <SDL3/SDL.h>
+#include "win32hle.h"
+
+#define DS_OK               0u
+#define DSERR_INVALIDPARAM  0x80070057u
+#define DSERR_NODRIVER      0x88780078u
+#define DSERR_INVALIDCALL   0x88780032u
+#define DSERR_PRIOLEVELNEEDED 0x88780046u
+#define DSERR_BUFFERLOST    0x88780096u
+#define DSBCAPS_PRIMARYBUFFER 0x00000001u
+#define DSBPLAY_LOOPING     0x00000001u
+#define DSBSTATUS_PLAYING   0x00000001u
+#define DSBSTATUS_LOOPING   0x00000004u
+
+#define OUT_RATE 44100
+
+typedef struct {
+    uint8_t *data;              /* the samples, guest-visible */
+    int *data_refs;             /* shared with duplicates */
+    uint32_t bytes, flags;
+    int channels, bits, rate, block;
+    int playing, looping, primary;
+    double pos;                 /* where the mixer has read to, in frames */
+    double pos0;                /* ...and where its last mix began */
+    int mixed;                  /* pos0 is from the last mix (not set since) */
+    int volume, pan;            /* hundredths of a dB; -10000..10000 */
+    float gl, gr;
+    /* DirectSound 3D (a DSBCAPS_CTRL3D buffer): where it is, as a listener hears it */
+    int is3d, mode3d;           /* DS3DMODE_NORMAL 0, HEADRELATIVE 1, DISABLE 2 */
+    float p3d[3], mind, maxd;
+} dsbuf;
+/* the one listener (IDirectSound3DListener on the primary buffer) */
+static struct { float pos[3], front[3], top[3], rolloff, distf; } g_lis = { { 0, 0, 0 }, { 0, 0, 1 }, { 0, 1, 0 }, 1, 1 };
+
+static pthread_mutex_t g_mix = PTHREAD_MUTEX_INITIALIZER;
+#define MAX_BUFS 256
+static dsbuf *g_buf[MAX_BUFS];
+static SDL_AudioStream *g_sdl_out;
+static int g_audio_ok = -1;
+static float g_master = 1.0f;
+static uint64_t g_mix_at;       /* when the last mix ran (SDL's counter) */
+static int g_mix_frames;        /* ...and how many output frames it made */
+void hle_dsound_set_master(float gain) { g_master = gain; }
+static dsbuf *buf_of(uint32_t self);
+int hle_dsound_buffer_gains(uint32_t buffer, float *l, float *r) {
+    pthread_mutex_lock(&g_mix);
+    dsbuf *b = buf_of(buffer);
+    if (b) *l = b->gl, *r = b->gr;
+    pthread_mutex_unlock(&g_mix);
+    return b != NULL;
+}
+
+static void gains(dsbuf *b) {
+    float v = b->volume <= -10000 ? 0.0f : powf(10.0f, (float)b->volume / 2000.0f);
+    float l = 1.0f, r = 1.0f;
+    if (b->is3d && b->mode3d != 2) {
+        /* inverse distance past the minimum, held at the maximum; panned
+         * by the side the sound is on (DirectSound is left-handed: right =
+         * top x front) */
+        float rel[3];
+        for (int k = 0; k < 3; k++) rel[k] = b->mode3d == 1 ? b->p3d[k] : b->p3d[k] - g_lis.pos[k];
+        float d = sqrtf(rel[0] * rel[0] + rel[1] * rel[1] + rel[2] * rel[2]);
+        float mind = b->mind > 0 ? b->mind : 1.0f, maxd = b->maxd > mind ? b->maxd : 1e9f;
+        float dd = d < mind ? mind : d > maxd ? maxd : d;
+        float att = mind / (mind + g_lis.rolloff * (dd - mind));
+        const float *f = g_lis.front, *t = g_lis.top;
+        float right[3] = { t[1] * f[2] - t[2] * f[1], t[2] * f[0] - t[0] * f[2], t[0] * f[1] - t[1] * f[0] };
+        float rn = sqrtf(right[0] * right[0] + right[1] * right[1] + right[2] * right[2]);
+        float side = d > 1e-4f && rn > 1e-6f ? (rel[0] * right[0] + rel[1] * right[1] + rel[2] * right[2]) / (d * rn) : 0.0f;
+        v *= att;
+        l = side > 0 ? 1.0f - 0.7f * side : 1.0f, r = side < 0 ? 1.0f + 0.7f * side : 1.0f;
+    }
+    /* a 3D buffer has no pan control on Windows (DSBCAPS_CTRL3D and
+     * DSBCAPS_CTRLPAN cannot be combined): its side comes from the 3D mix */
+    else {
+        if (b->pan < 0) r = b->pan <= -10000 ? 0.0f : powf(10.0f, (float)b->pan / 2000.0f);
+        if (b->pan > 0) l = b->pan >= 10000 ? 0.0f : powf(10.0f, (float)-b->pan / 2000.0f);
+    }
+    b->gl = v * l, b->gr = v * r;
+}
+
+static inline float sample(const dsbuf *b, uint32_t frame, int ch) {
+    const uint8_t *p = b->data + (size_t)frame * (uint32_t)b->block + (b->channels > 1 ? (size_t)ch * (uint32_t)(b->bits / 8) : 0);
+    return b->bits == 16 ? (float)*(const int16_t *)p / 32768.0f : ((float)*p - 128.0f) / 128.0f;
+}
+
+static int audio_open(void);
+static int audio_open_once(void) { return audio_open(); }
+
+/* Host streams: PCM a host pushes (a movie's sound), mixed with the
+ * buffers. A ring of interleaved s16 at the stream's rate, played at that
+ * rate. */
+#define MAX_STREAMS 4
+#define STREAM_FRAMES (1 << 17)
+static struct { int used, channels, rate; float gain; int16_t *ring; uint32_t rd, wr; double pos; } g_stream[MAX_STREAMS];
+int hle_audio_stream_open(int rate, int channels) {
+    if (!audio_open_once()) return -1;
+    pthread_mutex_lock(&g_mix);
+    int id = -1;
+    for (int i = 0; i < MAX_STREAMS && id < 0; i++)
+        if (!g_stream[i].used) {
+            id = i;
+            g_stream[i].ring = (int16_t *)calloc(STREAM_FRAMES * 2, 2);
+            g_stream[i].used = 1, g_stream[i].channels = channels, g_stream[i].rate = rate, g_stream[i].gain = 1.0f;
+            g_stream[i].rd = g_stream[i].wr = 0, g_stream[i].pos = 0;
+        }
+    pthread_mutex_unlock(&g_mix);
+    return id;
+}
+void hle_audio_stream_push(int id, const int16_t *pcm, int frames) {
+    if (id < 0 || id >= MAX_STREAMS) return;
+    pthread_mutex_lock(&g_mix);
+    for (int f = 0; f < frames && g_stream[id].wr - g_stream[id].rd < STREAM_FRAMES - 1; f++, g_stream[id].wr++) {
+        uint32_t k = g_stream[id].wr % STREAM_FRAMES;
+        g_stream[id].ring[2 * k] = pcm[f * g_stream[id].channels];
+        g_stream[id].ring[2 * k + 1] = pcm[f * g_stream[id].channels + (g_stream[id].channels > 1)];
+    }
+    pthread_mutex_unlock(&g_mix);
+}
+int hle_audio_stream_queued(int id) {                    /* frames not yet played */
+    if (id < 0 || id >= MAX_STREAMS) return 0;
+    pthread_mutex_lock(&g_mix);
+    int n = (int)(g_stream[id].wr - g_stream[id].rd);
+    pthread_mutex_unlock(&g_mix);
+    return n;
+}
+void hle_audio_stream_gain(int id, float gain) { if (id >= 0 && id < MAX_STREAMS) g_stream[id].gain = gain; }
+void hle_audio_stream_close(int id) {
+    if (id < 0 || id >= MAX_STREAMS) return;
+    pthread_mutex_lock(&g_mix);
+    free(g_stream[id].ring);
+    memset(&g_stream[id], 0, sizeof g_stream[id]);
+    pthread_mutex_unlock(&g_mix);
+}
+
+static void mix(void *ud, Uint8 *stream, int len) {
+    (void)ud;
+    int frames = len / 4;
+    static float acc[2 * 8192];
+    if (frames > 8192) frames = 8192;
+    memset(acc, 0, sizeof(float) * 2 * (size_t)frames);
+    pthread_mutex_lock(&g_mix);
+    for (int i = 0; i < MAX_BUFS; i++) {
+        dsbuf *b = g_buf[i];
+        if (!b || !b->playing || b->primary || !b->block) continue;
+        uint32_t nframes = b->bytes / (uint32_t)b->block;
+        double step = (double)b->rate / OUT_RATE;
+        b->pos0 = b->pos, b->mixed = 1;
+        for (int f = 0; f < frames && b->playing; f++) {
+            uint32_t at = (uint32_t)b->pos;
+            if (at >= nframes) {
+                if (b->looping) { b->pos -= nframes; at = (uint32_t)b->pos; if (at >= nframes) b->pos = 0, at = 0; }
+                else { b->playing = 0; b->pos = 0; break; }
+            }
+            float l = sample(b, at, 0), r = b->channels > 1 ? sample(b, at, 1) : l;
+            acc[2 * f] += l * b->gl;
+            acc[2 * f + 1] += r * b->gr;
+            b->pos += step;
+        }
+    }
+    g_mix_at = SDL_GetPerformanceCounter(), g_mix_frames = frames;
+    for (int i = 0; i < MAX_STREAMS; i++) {
+        if (!g_stream[i].used) continue;
+        double step = (double)g_stream[i].rate / OUT_RATE;
+        for (int f = 0; f < frames && g_stream[i].rd < g_stream[i].wr; f++) {
+            uint32_t k = g_stream[i].rd % STREAM_FRAMES;
+            acc[2 * f] += g_stream[i].ring[2 * k] / 32768.0f * g_stream[i].gain;
+            acc[2 * f + 1] += g_stream[i].ring[2 * k + 1] / 32768.0f * g_stream[i].gain;
+            g_stream[i].pos += step;
+            while (g_stream[i].pos >= 1.0 && g_stream[i].rd < g_stream[i].wr) g_stream[i].pos -= 1.0, g_stream[i].rd++;
+        }
+    }
+    pthread_mutex_unlock(&g_mix);
+    int16_t *out = (int16_t *)stream;
+    for (int k = 0; k < 2 * frames; k++) {
+        float v = acc[k] * g_master * 32767.0f;
+        out[k] = (int16_t)(v > 32767.0f ? 32767 : v < -32768.0f ? -32768 : v);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+/* In a browser SDL's audio cannot be opened from the game's thread (its
+ * Emscripten driver keeps its state on the page's thread), so the mixer
+ * feeds a ring of stereo s16 frames in shared memory from a thread of its
+ * own, and an AudioWorklet on the page's thread (plain JS, started here)
+ * plays the ring out. [0] is the read index (the worklet's), [1] the
+ * write index (the feeder's), both free-running frame counts. */
+#include <emscripten.h>
+#include <emscripten/threading.h>
+#include <unistd.h>
+#define RING_FRAMES 16384u                                /* 370 ms; the feeder keeps ~90 ms queued */
+#define RING_KEEP   4096u
+static int16_t g_ring[RING_FRAMES * 2];
+static uint32_t g_ring_idx[2];
+EM_JS(void, web_audio_start_js, (int rate, void *ring, int frames, void *idx), {
+    try {
+        var ctx = new AudioContext({ sampleRate: rate, latencyHint: 'interactive' });
+        var code = "class R extends AudioWorkletProcessor {" +
+            " constructor(o) { super(); var p = o.processorOptions; this.pcm = new Int16Array(p.buffer, p.ring, p.frames * 2); this.idx = new Uint32Array(p.buffer, p.idx, 2); this.mask = p.frames - 1; }" +
+            " process(inputs, outputs) { var out = outputs[0], L = out[0], R = out[1] || out[0], n = L.length;" +
+            "  var rd = Atomics.load(this.idx, 0), wr = Atomics.load(this.idx, 1), avail = (wr - rd) >>> 0, take = Math.min(n, avail), i;" +
+            "  for (i = 0; i < take; i++) { var f = ((rd + i) & this.mask) * 2; L[i] = this.pcm[f] / 32768; R[i] = this.pcm[f + 1] / 32768; }" +
+            "  for (; i < n; i++) { L[i] = 0; R[i] = 0; }" +
+            "  Atomics.store(this.idx, 0, (rd + take) >>> 0); return true; } }" +
+            " registerProcessor('ra2-ring', R);";
+        var url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+        ctx.audioWorklet.addModule(url).then(function() {
+            var node = new AudioWorkletNode(ctx, 'ra2-ring', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2],
+                processorOptions: { buffer: wasmMemory.buffer, ring: ring, frames: frames, idx: idx } });
+            node.connect(ctx.destination);
+        }).catch(function(e) { err('[dsound] worklet: ' + e); });
+        var resume = function() { if (ctx.state !== 'running') ctx.resume(); };
+        document.addEventListener('click', resume);
+        document.addEventListener('keydown', resume);
+        resume();
+        Module['ra2Audio'] = ctx;
+    } catch (e) { err('[dsound] web audio: ' + e); }
+});
+static void web_audio_start(int rate, void *ring, int frames, void *idx) {
+    /* on the page's thread, which owns the AudioContext */
+    emscripten_async_run_in_main_runtime_thread(EM_FUNC_SIG_VIIII, web_audio_start_js, rate, ring, frames, idx);
+}
+static void *audio_feeder(void *arg) {
+    (void)arg;
+    uint8_t chunk[1024 * 4];
+    uint32_t last_rd = 0, moved_at = hle_ticks_ms();
+    for (;;) {
+        uint32_t rd = __atomic_load_n(&g_ring_idx[0], __ATOMIC_ACQUIRE), wr = g_ring_idx[1];
+        uint32_t used = wr - rd, now = hle_ticks_ms();
+        if (rd != last_rd) last_rd = rd, moved_at = now;
+        if (used < RING_KEEP && RING_FRAMES - used >= 1024u) {
+            mix(NULL, chunk, sizeof chunk);
+            for (uint32_t i = 0; i < 1024u; i++) {
+                uint32_t f = (wr + i) & (RING_FRAMES - 1);
+                g_ring[2 * f] = ((int16_t *)chunk)[2 * i];
+                g_ring[2 * f + 1] = ((int16_t *)chunk)[2 * i + 1];
+            }
+            __atomic_store_n(&g_ring_idx[1], wr + 1024u, __ATOMIC_RELEASE);
+        } else if (now - moved_at > 500) {
+            /* the page is not playing (its AudioContext suspended, the tab in
+             * the background): the mixer runs anyway, into nothing, so the
+             * buffers' play cursors keep moving and a game watching them
+             * (streaming music, waiting for a sound to end) goes on */
+            mix(NULL, chunk, sizeof chunk);
+            usleep(1024u * 1000u / OUT_RATE * 1000u);
+        } else {
+            usleep(5000);
+        }
+    }
+    return NULL;
+}
+static int audio_open(void) {
+    if (g_audio_ok >= 0) return g_audio_ok;
+    g_audio_ok = 0;
+    pthread_t t;
+    if (pthread_create(&t, NULL, audio_feeder, NULL) != 0) { fprintf(stderr, "[dsound] no feeder thread: silent\n"); return 0; }
+    pthread_detach(t);
+    web_audio_start(OUT_RATE, g_ring, (int)RING_FRAMES, g_ring_idx);
+    fprintf(stderr, "[dsound] web audio, %d Hz\n", OUT_RATE);
+    return g_audio_ok = 1;
+}
+#else
+/* SDL3: a stream that asks for audio, fed by the same mix() SDL2 called. */
+static void stream_cb(void *ud, SDL_AudioStream *st, int additional, int total) {
+    (void)total;
+    static uint8_t buf[16384];
+    while (additional > 0) {
+        int n = additional > (int)sizeof buf ? (int)sizeof buf : additional;
+        n &= ~3;
+        if (n <= 0) break;
+        mix(ud, buf, n);
+        SDL_PutAudioStreamData(st, buf, n);
+        additional -= n;
+    }
+}
+static int audio_open(void) {
+    if (g_audio_ok >= 0) return g_audio_ok;
+    g_audio_ok = 0;
+    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");      /* SIGINT and SIGTERM end the process, not WM_CLOSE */
+    SDL_AudioSpec want = { SDL_AUDIO_S16, 2, OUT_RATE };
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO))
+        g_sdl_out = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &want, stream_cb, NULL);
+    if (!g_sdl_out) {
+        /* No sound card: a silent device whose cursors still move. */
+        fprintf(stderr, "[dsound] no audio device (%s): silent\n", SDL_GetError());
+        SDL_QuitSubSystem(SDL_INIT_AUDIO);
+        SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+        if (SDL_InitSubSystem(SDL_INIT_AUDIO))
+            g_sdl_out = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &want, stream_cb, NULL);
+        if (!g_sdl_out) { fprintf(stderr, "[dsound] no audio: %s\n", SDL_GetError()); return 0; }
+    }
+    SDL_ResumeAudioStreamDevice(g_sdl_out);
+    fprintf(stderr, "[dsound] %s, %d Hz\n", SDL_GetCurrentAudioDriver(), OUT_RATE);
+    return g_audio_ok = 1;
+}
+#endif
+
+/* The play cursor, in bytes. The mixer reads a callback's worth at a time,
+ * but a sound card's cursor moves smoothly: between mixes it is moved on by
+ * the time since the last one, up to where that mix read to. A game that
+ * streams by the cursor counts on that: one that refills the buffer when the
+ * cursor reaches its own write position would otherwise find them equal,
+ * take the buffer for empty and write over a lap not yet played. Under
+ * g_mix. */
+static uint32_t cursor(const dsbuf *b) {
+    if (!b->block || !b->bytes) return 0;
+    double pos = b->pos;
+    if (b->playing && b->mixed && g_mix_frames) {
+        double out = (double)(SDL_GetPerformanceCounter() - g_mix_at) * OUT_RATE / (double)SDL_GetPerformanceFrequency();
+        if (out > g_mix_frames) out = g_mix_frames;
+        double nframes = (double)(b->bytes / (uint32_t)b->block);
+        double end = b->pos < b->pos0 ? b->pos + nframes : b->pos;   /* the mix wrapped */
+        pos = b->pos0 + out * b->rate / OUT_RATE;
+        if (pos > end) pos = end;
+        if (pos >= nframes) pos -= nframes;
+    }
+    return ((uint32_t)pos * (uint32_t)b->block) % b->bytes;
+}
+
+/* the object: vtable, refs, then the buffer slot */
+#define SLOT(self) MEM32((self) + 8)
+static dsbuf *buf_of(uint32_t self) { uint32_t i = SLOT(self); return i < MAX_BUFS ? g_buf[i] : NULL; }
+
+static uint32_t g_vt_ds, g_vt_buf;
+static uint32_t new_buffer(dsbuf *b) {
+    pthread_mutex_lock(&g_mix);
+    int slot = -1;
+    for (int i = 0; i < MAX_BUFS && slot < 0; i++) if (!g_buf[i]) slot = i;
+    if (slot >= 0) g_buf[slot] = b;
+    pthread_mutex_unlock(&g_mix);
+    if (slot < 0) return 0;
+    uint32_t o = hle_com_new(g_vt_buf, 12);
+    SLOT(o) = (uint32_t)slot;
+    return o;
+}
+
+/* ---- IDirectSoundBuffer ---- */
+static uint32_t buf_release(uint32_t self) {
+    uint32_t n = --MEM32(self + 4);
+    if (!n) {
+        pthread_mutex_lock(&g_mix);
+        dsbuf *b = buf_of(self);
+        g_buf[SLOT(self)] = NULL;
+        pthread_mutex_unlock(&g_mix);
+        if (b) {
+            if (--*b->data_refs == 0) { hle_free(b->data); free(b->data_refs); }
+            free(b);
+        }
+        hle_com_free(self);
+    }
+    return n;
+}
+static void b_Release(void) { RET(buf_release(A32(0)), 1); }
+static void b_GetCaps(void) {                            /* (this, &DSBCAPS) */
+    dsbuf *b = buf_of(A32(0));
+    uint32_t c = A32(1);
+    if (!b || !c) RET(DSERR_INVALIDPARAM, 2);
+    MEM32(c + 4) = b->flags | 0x8u /* LOCSOFTWARE */, MEM32(c + 8) = b->bytes, MEM32(c + 12) = 0, MEM32(c + 16) = 0;
+    RET(DS_OK, 2);
+}
+static void b_GetCurrentPosition(void) {                 /* (this, &play, &write) */
+    dsbuf *b = buf_of(A32(0));
+    if (!b) RET(DSERR_INVALIDPARAM, 3);
+    pthread_mutex_lock(&g_mix);
+    uint32_t play = cursor(b);
+    uint32_t lead = b->block ? (uint32_t)(b->rate / 100) * (uint32_t)b->block : 0;   /* 10 ms ahead */
+    pthread_mutex_unlock(&g_mix);
+    if (b->bytes) play %= b->bytes;
+    if (A32(1)) MEM32(A32(1)) = play;
+    if (A32(2)) MEM32(A32(2)) = b->bytes ? (play + (b->playing ? lead : 0)) % b->bytes : 0;
+    RET(DS_OK, 3);
+}
+static void b_GetFormat(void) {                          /* (this, &wfx, size, &written) */
+    dsbuf *b = buf_of(A32(0));
+    uint32_t w = A32(1);
+    if (!b) RET(DSERR_INVALIDPARAM, 4);
+    if (w && A32(2) >= 16) {
+        MEM16(w) = 1, MEM16(w + 2) = (uint16_t)b->channels, MEM32(w + 4) = (uint32_t)b->rate;
+        MEM32(w + 8) = (uint32_t)(b->rate * b->block), MEM16(w + 12) = (uint16_t)b->block, MEM16(w + 14) = (uint16_t)b->bits;
+        if (A32(2) >= 18) MEM16(w + 16) = 0;
+    }
+    if (A32(3)) MEM32(A32(3)) = 18;
+    RET(DS_OK, 4);
+}
+static void b_GetVolume(void)    { dsbuf *b = buf_of(A32(0)); if (A32(1) && b) MEM32(A32(1)) = (uint32_t)b->volume; RET(b ? DS_OK : DSERR_INVALIDPARAM, 2); }
+static void b_GetPan(void)       { dsbuf *b = buf_of(A32(0)); if (A32(1) && b) MEM32(A32(1)) = (uint32_t)b->pan; RET(b ? DS_OK : DSERR_INVALIDPARAM, 2); }
+static void b_GetFrequency(void) { dsbuf *b = buf_of(A32(0)); if (A32(1) && b) MEM32(A32(1)) = (uint32_t)b->rate; RET(b ? DS_OK : DSERR_INVALIDPARAM, 2); }
+static void b_GetStatus(void) {
+    dsbuf *b = buf_of(A32(0));
+    if (A32(1) && b) MEM32(A32(1)) = (b->playing ? DSBSTATUS_PLAYING : 0u) | (b->playing && b->looping ? DSBSTATUS_LOOPING : 0u);
+    RET(b ? DS_OK : DSERR_INVALIDPARAM, 2);
+}
+static void b_Initialize(void) { RET(DSERR_INVALIDCALL, 3); }   /* already initialized */
+static void b_Lock(void) {                               /* (this, offset, bytes, &p1, &n1, &p2, &n2, flags) */
+    dsbuf *b = buf_of(A32(0));
+    if (!b || b->primary) RET(b ? DSERR_PRIOLEVELNEEDED : DSERR_INVALIDPARAM, 8);
+    uint32_t off = A32(1), n = A32(2), fl = A32(7);
+    if (fl & 2u) off = 0, n = b->bytes;                  /* DSBLOCK_ENTIREBUFFER */
+    else if (fl & 1u) {                                  /* DSBLOCK_FROMWRITECURSOR */
+        pthread_mutex_lock(&g_mix);
+        off = b->block ? (cursor(b) + (uint32_t)(b->rate / 100) * (uint32_t)b->block) % b->bytes : 0;
+        pthread_mutex_unlock(&g_mix);
+    }
+    if (off >= b->bytes || n > b->bytes) RET(DSERR_INVALIDPARAM, 8);
+    uint32_t n1 = off + n <= b->bytes ? n : b->bytes - off;
+    if (A32(3)) MEM32(A32(3)) = hle_va(b->data + off);
+    if (A32(4)) MEM32(A32(4)) = n1;
+    if (A32(5)) MEM32(A32(5)) = n1 < n ? hle_va(b->data) : 0;
+    if (A32(6)) MEM32(A32(6)) = n - n1;
+    RET(DS_OK, 8);
+}
+static void b_Unlock(void) { RET(DS_OK, 5); }            /* (this, p1, n1, p2, n2): the memory is the buffer */
+static void b_Play(void) {                               /* (this, reserved, priority, flags) */
+    dsbuf *b = buf_of(A32(0));
+    if (!b) RET(DSERR_INVALIDPARAM, 4);
+    pthread_mutex_lock(&g_mix);
+    if (!b->playing) b->mixed = 0;
+    b->playing = 1, b->looping = (A32(3) & DSBPLAY_LOOPING) != 0;
+    pthread_mutex_unlock(&g_mix);
+    RET(DS_OK, 4);
+}
+static void b_SetCurrentPosition(void) {
+    dsbuf *b = buf_of(A32(0));
+    if (!b || !b->block) RET(DSERR_INVALIDPARAM, 2);
+    pthread_mutex_lock(&g_mix);
+    b->pos = (double)((A32(1) % (b->bytes ? b->bytes : 1)) / (uint32_t)b->block), b->mixed = 0;
+    pthread_mutex_unlock(&g_mix);
+    RET(DS_OK, 2);
+}
+static void b_SetFormat(void) {                          /* the primary's: the mix is at the device rate anyway */
+    dsbuf *b = buf_of(A32(0));
+    uint32_t w = A32(1);
+    if (b && w) b->channels = MEM16(w + 2), b->rate = (int)MEM32(w + 4), b->bits = MEM16(w + 14), b->block = MEM16(w + 12);
+    RET(DS_OK, 2);
+}
+static void b_SetVolume(void) {
+    dsbuf *b = buf_of(A32(0));
+    if (!b) RET(DSERR_INVALIDPARAM, 2);
+    pthread_mutex_lock(&g_mix);
+    b->volume = (int)A32(1);
+    gains(b);
+    pthread_mutex_unlock(&g_mix);
+    RET(DS_OK, 2);
+}
+static void b_SetPan(void) {
+    dsbuf *b = buf_of(A32(0));
+    if (!b) RET(DSERR_INVALIDPARAM, 2);
+    pthread_mutex_lock(&g_mix);
+    b->pan = (int)A32(1);
+    gains(b);
+    pthread_mutex_unlock(&g_mix);
+    RET(DS_OK, 2);
+}
+static void b_SetFrequency(void) {
+    dsbuf *b = buf_of(A32(0));
+    if (!b) RET(DSERR_INVALIDPARAM, 2);
+    pthread_mutex_lock(&g_mix);
+    if (A32(1)) b->rate = (int)A32(1);
+    pthread_mutex_unlock(&g_mix);
+    RET(DS_OK, 2);
+}
+static void b_Stop(void) {
+    dsbuf *b = buf_of(A32(0));
+    if (!b) RET(DSERR_INVALIDPARAM, 1);
+    pthread_mutex_lock(&g_mix);
+    b->playing = 0;
+    pthread_mutex_unlock(&g_mix);
+    RET(DS_OK, 1);
+}
+static void b_Restore(void) { RET(DS_OK, 1); }
+
+/* ---- DirectSound 8 and 3D ---- */
+static uint32_t g_vt_3db, g_vt_lis, g_lis_obj;
+static float fa(int i) { uint32_t v = A32(i); float f; memcpy(&f, &v, 4); return f; }
+static void all3d_gains(void) { for (int i = 0; i < MAX_BUFS; i++) if (g_buf[i] && g_buf[i]->is3d) gains(g_buf[i]); }
+static void b_QueryInterface(void) {                     /* (this, iid, &out) */
+    uint32_t self = A32(0), d1 = A32(1) ? MEM32(A32(1)) : 0, out = A32(2);
+    dsbuf *b = buf_of(self);
+    if (d1 == 0x279AFA86u && b) {                        /* IID_IDirectSound3DBuffer */
+        /* vtable, refs, the buffer's slot, the buffer: the interface holds
+         * a reference on its buffer, so the slot stays the buffer's for as
+         * long as the interface lives */
+        uint32_t o = hle_com_new(g_vt_3db, 16);
+        SLOT(o) = SLOT(self), MEM32(o + 12) = self;
+        MEM32(self + 4)++;
+        pthread_mutex_lock(&g_mix);
+        if (!b->is3d) b->is3d = 1, b->mind = 1.0f, b->maxd = 1e9f, gains(b);
+        pthread_mutex_unlock(&g_mix);
+        if (out) MEM32(out) = o;
+        RET(DS_OK, 3);
+    }
+    if (d1 == 0x279AFA84u) {                             /* IID_IDirectSound3DListener */
+        /* one listener, made once and kept: hle_com_new's reference is
+         * ours, and l_Release never gives it up */
+        if (!g_lis_obj) g_lis_obj = hle_com_new(g_vt_lis, 12);
+        MEM32(g_lis_obj + 4)++;
+        if (out) MEM32(out) = g_lis_obj;
+        RET(DS_OK, 3);
+    }
+    if (out) MEM32(out) = self;
+    MEM32(self + 4)++;
+    RET(DS_OK, 3);
+}
+static void b8_SetFX(void) { RET(0x8878001Eu, 4); }      /* DSERR_CONTROLUNAVAIL */
+static void b8_AcquireResources(void) { RET(DS_OK, 4); }
+static void b8_GetObjectInPath(void) { if (A32(4)) MEM32(A32(4)) = 0; RET(0x88780FFFu, 5); }
+static void d8_VerifyCertification(void) { if (A32(1)) MEM32(A32(1)) = 0; RET(DS_OK, 2); }
+
+static void t_Release(void) {
+    uint32_t self = A32(0), n = --MEM32(self + 4);
+    if (!n) {
+        uint32_t buf = MEM32(self + 12);
+        hle_com_free(self);
+        buf_release(buf);
+    }
+    RET(n, 1);
+}
+static void l_Release(void) {
+    uint32_t self = A32(0);
+    if (MEM32(self + 4) > 1) MEM32(self + 4)--;          /* never below our own reference */
+    RET(MEM32(self + 4) - 1, 1);
+}
+static void t_SetPosition(void) {                        /* (this, x, y, z, apply) */
+    dsbuf *b = buf_of(A32(0));
+    if (b) { pthread_mutex_lock(&g_mix); b->p3d[0] = fa(1), b->p3d[1] = fa(2), b->p3d[2] = fa(3); gains(b); pthread_mutex_unlock(&g_mix); }
+    RET(DS_OK, 5);
+}
+static void t_GetPosition(void) {
+    dsbuf *b = buf_of(A32(0));
+    if (b && A32(1)) memcpy(hle_ptr(A32(1)), b->p3d, 12);
+    RET(DS_OK, 2);
+}
+static void t_SetMinDistance(void) { dsbuf *b = buf_of(A32(0)); if (b) { pthread_mutex_lock(&g_mix); b->mind = fa(1); gains(b); pthread_mutex_unlock(&g_mix); } RET(DS_OK, 3); }
+static void t_SetMaxDistance(void) { dsbuf *b = buf_of(A32(0)); if (b) { pthread_mutex_lock(&g_mix); b->maxd = fa(1); gains(b); pthread_mutex_unlock(&g_mix); } RET(DS_OK, 3); }
+static void t_GetMinDistance(void) { dsbuf *b = buf_of(A32(0)); if (b && A32(1)) memcpy(hle_ptr(A32(1)), &b->mind, 4); RET(DS_OK, 2); }
+static void t_GetMaxDistance(void) { dsbuf *b = buf_of(A32(0)); if (b && A32(1)) memcpy(hle_ptr(A32(1)), &b->maxd, 4); RET(DS_OK, 2); }
+static void t_SetMode(void) { dsbuf *b = buf_of(A32(0)); if (b) { pthread_mutex_lock(&g_mix); b->mode3d = (int)A32(1); gains(b); pthread_mutex_unlock(&g_mix); } RET(DS_OK, 3); }
+static void t_GetMode(void) { dsbuf *b = buf_of(A32(0)); if (b && A32(1)) MEM32(A32(1)) = (uint32_t)b->mode3d; RET(DS_OK, 2); }
+static void t_SetAllParameters(void) {                   /* (this, DS3DBUFFER*, apply) */
+    dsbuf *b = buf_of(A32(0));
+    uint32_t p = A32(1);
+    if (b && p) {
+        pthread_mutex_lock(&g_mix);
+        memcpy(b->p3d, hle_ptr(p + 4), 12);
+        memcpy(&b->mind, hle_ptr(p + 52), 4), memcpy(&b->maxd, hle_ptr(p + 56), 4);
+        b->mode3d = (int)MEM32(p + 60);
+        gains(b);
+        pthread_mutex_unlock(&g_mix);
+    }
+    RET(DS_OK, 3);
+}
+static void t_GetAllParameters(void) {
+    dsbuf *b = buf_of(A32(0));
+    uint32_t p = A32(1);
+    if (b && p) {
+        memset(hle_ptr(p + 4), 0, 60);
+        memcpy(hle_ptr(p + 4), b->p3d, 12);
+        MEM32(p + 28) = MEM32(p + 32) = 360;
+        MEM32(p + 44) = 0; memcpy(hle_ptr(p + 52), &b->mind, 4), memcpy(hle_ptr(p + 56), &b->maxd, 4);
+        MEM32(p + 60) = (uint32_t)b->mode3d;
+    }
+    RET(DS_OK, 2);
+}
+static void t_ok2(void) { RET(DS_OK, 3); }
+static void t_ok3(void) { RET(DS_OK, 4); }
+static void t_ok4(void) { RET(DS_OK, 5); }
+static void t_zero1(void) { if (A32(1)) MEM32(A32(1)) = 0; RET(DS_OK, 2); }
+static void t_zero2(void) { if (A32(1)) MEM32(A32(1)) = 0; if (A32(2)) MEM32(A32(2)) = 0; RET(DS_OK, 3); }
+static void l_SetPosition(void) { pthread_mutex_lock(&g_mix); g_lis.pos[0] = fa(1), g_lis.pos[1] = fa(2), g_lis.pos[2] = fa(3); all3d_gains(); pthread_mutex_unlock(&g_mix); RET(DS_OK, 5); }
+static void l_GetPosition(void) { if (A32(1)) memcpy(hle_ptr(A32(1)), g_lis.pos, 12); RET(DS_OK, 2); }
+static void l_SetOrientation(void) {                     /* (this, fx, fy, fz, tx, ty, tz, apply) */
+    pthread_mutex_lock(&g_mix);
+    for (int k = 0; k < 3; k++) g_lis.front[k] = fa(1 + k), g_lis.top[k] = fa(4 + k);
+    all3d_gains();
+    pthread_mutex_unlock(&g_mix);
+    RET(DS_OK, 8);
+}
+static void l_GetOrientation(void) {
+    if (A32(1)) memcpy(hle_ptr(A32(1)), g_lis.front, 12);
+    if (A32(2)) memcpy(hle_ptr(A32(2)), g_lis.top, 12);
+    RET(DS_OK, 3);
+}
+static void l_SetRolloffFactor(void) { pthread_mutex_lock(&g_mix); g_lis.rolloff = fa(1); all3d_gains(); pthread_mutex_unlock(&g_mix); RET(DS_OK, 3); }
+static void l_GetRolloffFactor(void) { if (A32(1)) memcpy(hle_ptr(A32(1)), &g_lis.rolloff, 4); RET(DS_OK, 2); }
+static void l_SetDistanceFactor(void) { g_lis.distf = fa(1); RET(DS_OK, 3); }
+static void l_GetDistanceFactor(void) { if (A32(1)) memcpy(hle_ptr(A32(1)), &g_lis.distf, 4); RET(DS_OK, 2); }
+static void l_SetAllParameters(void) {                   /* (this, DS3DLISTENER*, apply) */
+    uint32_t p = A32(1);
+    if (p) {
+        pthread_mutex_lock(&g_mix);
+        memcpy(g_lis.pos, hle_ptr(p + 4), 12);
+        memcpy(g_lis.front, hle_ptr(p + 28), 12), memcpy(g_lis.top, hle_ptr(p + 40), 12);
+        memcpy(&g_lis.distf, hle_ptr(p + 52), 4), memcpy(&g_lis.rolloff, hle_ptr(p + 56), 4);
+        all3d_gains();
+        pthread_mutex_unlock(&g_mix);
+    }
+    RET(DS_OK, 3);
+}
+static void l_GetAllParameters(void) {
+    uint32_t p = A32(1);
+    if (p) {
+        for (uint32_t k = 4; k < 64; k += 4) MEM32(p + k) = 0;
+        memcpy(hle_ptr(p + 4), g_lis.pos, 12);
+        memcpy(hle_ptr(p + 28), g_lis.front, 12), memcpy(hle_ptr(p + 40), g_lis.top, 12);
+        memcpy(hle_ptr(p + 52), &g_lis.distf, 4), memcpy(hle_ptr(p + 56), &g_lis.rolloff, 4);
+        float one = 1.0f; memcpy(hle_ptr(p + 60), &one, 4);
+    }
+    RET(DS_OK, 2);
+}
+static void l_Commit(void) { RET(DS_OK, 1); }
+static void vtables3d(void) {
+    if (g_vt_3db) return;
+    static const win32hle_shim t[] = {
+        { "IDirectSound3DBuffer::QueryInterface", hle_com_QueryInterface }, { "IDirectSound3DBuffer::AddRef", hle_com_AddRef },
+        { "IDirectSound3DBuffer::Release", t_Release }, { "IDirectSound3DBuffer::GetAllParameters", t_GetAllParameters },
+        { "IDirectSound3DBuffer::GetConeAngles", t_zero2 }, { "IDirectSound3DBuffer::GetConeOrientation", t_zero1 },
+        { "IDirectSound3DBuffer::GetConeOutsideVolume", t_zero1 }, { "IDirectSound3DBuffer::GetMaxDistance", t_GetMaxDistance },
+        { "IDirectSound3DBuffer::GetMinDistance", t_GetMinDistance }, { "IDirectSound3DBuffer::GetMode", t_GetMode },
+        { "IDirectSound3DBuffer::GetPosition", t_GetPosition }, { "IDirectSound3DBuffer::GetVelocity", t_zero1 },
+        { "IDirectSound3DBuffer::SetAllParameters", t_SetAllParameters }, { "IDirectSound3DBuffer::SetConeAngles", t_ok3 },
+        { "IDirectSound3DBuffer::SetConeOrientation", t_ok4 }, { "IDirectSound3DBuffer::SetConeOutsideVolume", t_ok2 },
+        { "IDirectSound3DBuffer::SetMaxDistance", t_SetMaxDistance }, { "IDirectSound3DBuffer::SetMinDistance", t_SetMinDistance },
+        { "IDirectSound3DBuffer::SetMode", t_SetMode }, { "IDirectSound3DBuffer::SetPosition", t_SetPosition },
+        { "IDirectSound3DBuffer::SetVelocity", t_ok4 }, { 0, 0 } };
+    static const win32hle_shim l[] = {
+        { "IDirectSound3DListener::QueryInterface", hle_com_QueryInterface }, { "IDirectSound3DListener::AddRef", hle_com_AddRef },
+        { "IDirectSound3DListener::Release", l_Release }, { "IDirectSound3DListener::GetAllParameters", l_GetAllParameters },
+        { "IDirectSound3DListener::GetDistanceFactor", l_GetDistanceFactor },
+        { "IDirectSound3DListener::GetDopplerFactor", t_zero1 }, { "IDirectSound3DListener::GetOrientation", l_GetOrientation },
+        { "IDirectSound3DListener::GetPosition", l_GetPosition }, { "IDirectSound3DListener::GetRolloffFactor", l_GetRolloffFactor },
+        { "IDirectSound3DListener::GetVelocity", t_zero1 }, { "IDirectSound3DListener::SetAllParameters", l_SetAllParameters },
+        { "IDirectSound3DListener::SetDistanceFactor", l_SetDistanceFactor },
+        { "IDirectSound3DListener::SetDopplerFactor", t_ok2 }, { "IDirectSound3DListener::SetOrientation", l_SetOrientation },
+        { "IDirectSound3DListener::SetPosition", l_SetPosition }, { "IDirectSound3DListener::SetRolloffFactor", l_SetRolloffFactor },
+        { "IDirectSound3DListener::SetVelocity", t_ok4 }, { "IDirectSound3DListener::CommitDeferredSettings", l_Commit }, { 0, 0 } };
+    g_vt_3db = hle_com_vtable(t);
+    g_vt_lis = hle_com_vtable(l);
+}
+
+/* ---- IDirectSound ---- */
+static void d_Release(void) {
+    uint32_t self = A32(0), n = --MEM32(self + 4);
+    if (!n) hle_com_free(self);
+    RET(n, 1);
+}
+static void d_CreateSoundBuffer(void) {                  /* (this, &DSBUFFERDESC, &out, outer) */
+    uint32_t d = A32(1), out = A32(2);
+    if (!d || !out) RET(DSERR_INVALIDPARAM, 4);
+    uint32_t flags = MEM32(d + 4), bytes = MEM32(d + 8), wfx = MEM32(d + 16);
+    dsbuf *b = (dsbuf *)calloc(1, sizeof *b);
+    b->flags = flags, b->primary = (flags & DSBCAPS_PRIMARYBUFFER) != 0;
+    b->channels = 2, b->bits = 16, b->rate = 22050, b->block = 4;
+    if (wfx) {
+        b->channels = MEM16(wfx + 2), b->rate = (int)MEM32(wfx + 4), b->block = MEM16(wfx + 12), b->bits = MEM16(wfx + 14);
+        if (MEM16(wfx) != 1 || (b->bits != 8 && b->bits != 16) || b->channels < 1 || b->channels > 2) {
+            fprintf(stderr, "[dsound] buffer format tag %u, %d bits, %d channels: not PCM this mixer plays\n", MEM16(wfx), b->bits, b->channels);
+            free(b);
+            RET(DSERR_INVALIDPARAM, 4);
+        }
+    }
+    if (b->primary) bytes = 4096 * 4;
+    b->bytes = bytes;
+    b->data = (uint8_t *)hle_alloc(bytes ? bytes : 4);
+    if (b->bits == 8) memset(b->data, 128, bytes);
+    b->data_refs = (int *)malloc(sizeof(int));
+    *b->data_refs = 1;
+    gains(b);
+    uint32_t o = new_buffer(b);
+    if (!o) { hle_free(b->data); free(b->data_refs); free(b); RET(DSERR_INVALIDPARAM, 4); }
+    MEM32(out) = o;
+    RET(DS_OK, 4);
+}
+static void d_GetCaps(void) {                            /* (this, &DSCAPS) */
+    uint32_t c = A32(1);
+    if (c) {
+        uint32_t size = MEM32(c);
+        memset(hle_ptr(c + 4), 0, size > 4 ? size - 4 : 0);
+        MEM32(c + 4) = 0x0F5Fu;                          /* the primary/secondary 8/16-bit mono/stereo, continuous rate */
+        MEM32(c + 8) = 100, MEM32(c + 12) = 100000;      /* min/max secondary rate */
+        MEM32(c + 16) = 1;                               /* primary buffers */
+        MEM32(c + 20) = 64, MEM32(c + 24) = 64, MEM32(c + 28) = 64;   /* max hw mixing: all, static, streaming */
+        MEM32(c + 32) = 64, MEM32(c + 36) = 64, MEM32(c + 40) = 64;   /* free hw */
+    }
+    RET(DS_OK, 2);
+}
+static void d_DuplicateSoundBuffer(void) {               /* (this, original, &out) */
+    dsbuf *src = buf_of(A32(1));
+    if (!src || !A32(2)) RET(DSERR_INVALIDPARAM, 3);
+    dsbuf *b = (dsbuf *)malloc(sizeof *b);
+    pthread_mutex_lock(&g_mix);
+    *b = *src;
+    (*b->data_refs)++;
+    pthread_mutex_unlock(&g_mix);
+    b->playing = 0, b->pos = 0;
+    uint32_t o = new_buffer(b);
+    MEM32(A32(2)) = o;
+    RET(o ? DS_OK : DSERR_INVALIDPARAM, 3);
+}
+static void d_SetCooperativeLevel(void) { RET(DS_OK, 3); }
+static void d_Compact(void) { RET(DS_OK, 1); }
+static void d_GetSpeakerConfig(void) { if (A32(1)) MEM32(A32(1)) = 4; RET(DS_OK, 2); }   /* DSSPEAKER_STEREO */
+static void d_SetSpeakerConfig(void) { RET(DS_OK, 2); }
+static void d_Initialize(void) { RET(DS_OK, 2); }
+
+static void vtables(void) {
+    if (g_vt_ds) return;
+    static const win32hle_shim ds[] = {
+        { "IDirectSound::QueryInterface", hle_com_QueryInterface }, { "IDirectSound::AddRef", hle_com_AddRef },
+        { "IDirectSound::Release", d_Release }, { "IDirectSound::CreateSoundBuffer", d_CreateSoundBuffer },
+        { "IDirectSound::GetCaps", d_GetCaps }, { "IDirectSound::DuplicateSoundBuffer", d_DuplicateSoundBuffer },
+        { "IDirectSound::SetCooperativeLevel", d_SetCooperativeLevel }, { "IDirectSound::Compact", d_Compact },
+        { "IDirectSound::GetSpeakerConfig", d_GetSpeakerConfig }, { "IDirectSound::SetSpeakerConfig", d_SetSpeakerConfig },
+        { "IDirectSound::Initialize", d_Initialize },
+        { "IDirectSound8::VerifyCertification", d8_VerifyCertification }, { 0, 0 } };
+    static const win32hle_shim buf[] = {
+        { "IDirectSoundBuffer::QueryInterface", b_QueryInterface }, { "IDirectSoundBuffer::AddRef", hle_com_AddRef },
+        { "IDirectSoundBuffer::Release", b_Release }, { "IDirectSoundBuffer::GetCaps", b_GetCaps },
+        { "IDirectSoundBuffer::GetCurrentPosition", b_GetCurrentPosition }, { "IDirectSoundBuffer::GetFormat", b_GetFormat },
+        { "IDirectSoundBuffer::GetVolume", b_GetVolume }, { "IDirectSoundBuffer::GetPan", b_GetPan },
+        { "IDirectSoundBuffer::GetFrequency", b_GetFrequency }, { "IDirectSoundBuffer::GetStatus", b_GetStatus },
+        { "IDirectSoundBuffer::Initialize", b_Initialize }, { "IDirectSoundBuffer::Lock", b_Lock },
+        { "IDirectSoundBuffer::Play", b_Play }, { "IDirectSoundBuffer::SetCurrentPosition", b_SetCurrentPosition },
+        { "IDirectSoundBuffer::SetFormat", b_SetFormat }, { "IDirectSoundBuffer::SetVolume", b_SetVolume },
+        { "IDirectSoundBuffer::SetPan", b_SetPan }, { "IDirectSoundBuffer::SetFrequency", b_SetFrequency },
+        { "IDirectSoundBuffer::Stop", b_Stop }, { "IDirectSoundBuffer::Unlock", b_Unlock },
+        { "IDirectSoundBuffer::Restore", b_Restore },
+        { "IDirectSoundBuffer8::SetFX", b8_SetFX }, { "IDirectSoundBuffer8::AcquireResources", b8_AcquireResources },
+        { "IDirectSoundBuffer8::GetObjectInPath", b8_GetObjectInPath }, { 0, 0 } };
+    g_vt_ds = hle_com_vtable(ds);
+    g_vt_buf = hle_com_vtable(buf);
+    vtables3d();
+}
+
+static void s_DirectSoundCreate(void) {                  /* (guid, &out, outer) */
+    vtables();
+    if (!A32(1)) RET(DSERR_INVALIDPARAM, 3);
+    if (!audio_open()) { MEM32(A32(1)) = 0; RET(DSERR_NODRIVER, 3); }
+    MEM32(A32(1)) = hle_com_new(g_vt_ds, 12);
+    RET(DS_OK, 3);
+}
+static void s_DirectSoundEnumerateA(void) {              /* (callback, context): the one device */
+    static uint32_t desc, mod;                           /* the guest may keep them */
+    if (!desc) desc = hle_guest_strdup("Primary Sound Driver"), mod = hle_guest_strdup("");
+    uint32_t a[4] = { 0, desc, mod, A32(1) };
+    if (A32(0)) hle_call_guest(A32(0), 4, a);
+    RET(DS_OK, 2);
+}
+
+/* CoCreateInstance(CLSID_DirectSound): the object DirectSoundCreate makes;
+ * the caller's IDirectSound::Initialize follows. */
+static uint32_t ds_create(const uint8_t *iid, uint32_t *out) {
+    (void)iid;
+    vtables();
+    if (!audio_open()) { *out = 0; return DSERR_NODRIVER; }
+    *out = hle_com_new(g_vt_ds, 12);
+    return DS_OK;
+}
+void hle_dsound_register_com(void) {
+    static const uint8_t CLSID_DirectSound[16] = { 0x46, 0xD9, 0xD4, 0x47, 0xE8, 0x62, 0xCF, 0x11,
+                                                   0x93, 0xBC, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00 };
+    hle_com_register_class(CLSID_DirectSound, ds_create);
+    static const uint8_t CLSID_DirectSound8[16] = { 0x3F, 0xCC, 0x01, 0x39, 0xB5, 0x84, 0xA4, 0x4F,
+                                                    0xBA, 0x35, 0xAA, 0x81, 0x72, 0xB8, 0xA0, 0x9B };
+    hle_com_register_class(CLSID_DirectSound8, ds_create);
+}
+
+const win32hle_shim win32hle_dsound[] = {
+    { "dsound.dll#1", s_DirectSoundCreate }, { "DirectSoundCreate", s_DirectSoundCreate },
+    { "dsound.dll#2", s_DirectSoundEnumerateA }, { "DirectSoundEnumerateA", s_DirectSoundEnumerateA },
+    { "dsound.dll#11", s_DirectSoundCreate }, { "DirectSoundCreate8", s_DirectSoundCreate },
+    { 0, 0 }
+};

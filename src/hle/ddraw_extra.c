@@ -46,7 +46,9 @@ static void x_Flip(void) {
         if (s->pitch == b->pitch) memcpy(s->px, b->px, (size_t)s->pitch * (size_t)rows);
         else for (int y = 0; y < rows; y++)
             memcpy(s->px + (size_t)y * s->pitch, b->px + (size_t)y * b->pitch, (size_t)bytes);
+        joyride_flipping = 1;                                   /* the presenter shows (and paces) each flip */
         hle_dd_mark(s);
+        joyride_flipping = 0;
     }
     RET(0, 3);                                                   /* DD_OK */
 }
