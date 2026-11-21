@@ -26,6 +26,7 @@ python3 "$root/tools/unpack.py" "$exe" "$out/mine" > "$out/unpack.txt"
 "$py" "$root/tools/funcs.py" "$out/mine" > "$out/funcs.txt"
 (cd "$pcr" && "$py" -m tools "$exe" --all -o "$out/recomp") > "$out/lift.log" 2>&1
 tail -4 "$out/lift.log"
+python3 "$root/tools/postlift.py" "$out/recomp"
 
 # every generated file must at least parse against the runtime headers
 ls "$out"/recomp/*.c | xargs -P "$(nproc)" -I{} sh -c \

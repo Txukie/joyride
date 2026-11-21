@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -63,8 +64,50 @@ static void joyride_seed_registry(void) {
 static const char *g_dump_dir;
 static uint32_t g_quit_after_ms, g_start_ms;
 
+/* JOYRIDE_KEYS="4:RETURN,6.5:DOWN": press (and 120 ms later release) a key at
+ * each time in seconds, for driving the game in scripted runs. */
+static const struct { const char *name; uint32_t vk, scan; } KEYNAMES[] = {
+    {"RETURN", 0x0D, 0x1C}, {"ESCAPE", 0x1B, 0x01}, {"SPACE", 0x20, 0x39},
+    {"UP", 0x26, 0x148}, {"DOWN", 0x28, 0x150}, {"LEFT", 0x25, 0x14B}, {"RIGHT", 0x27, 0x14D},
+    {"CTRL", 0x11, 0x1D}, {"TAB", 0x09, 0x0F}, {"Z", 0x5A, 0x2C}, {"X", 0x58, 0x2D},
+};
+#define MAX_SCRIPT 64
+static struct { uint32_t at_ms, vk, scan; int state; } g_script[MAX_SCRIPT];
+static int g_script_n;
+
+static void parse_keys(const char *spec) {
+    char buf[1024];
+    snprintf(buf, sizeof buf, "%s", spec);
+    for (char *tok = strtok(buf, ","); tok && g_script_n < MAX_SCRIPT; tok = strtok(NULL, ",")) {
+        char *colon = strchr(tok, ':');
+        if (!colon) continue;
+        *colon = 0;
+        for (size_t k = 0; k < sizeof KEYNAMES / sizeof KEYNAMES[0]; k++)
+            if (!strcasecmp(colon + 1, KEYNAMES[k].name)) {
+                g_script[g_script_n].at_ms = (uint32_t)(atof(tok) * 1000.0);
+                g_script[g_script_n].vk = KEYNAMES[k].vk;
+                g_script[g_script_n].scan = KEYNAMES[k].scan;
+                g_script_n++;
+            }
+    }
+}
+
+static void run_script(uint32_t t) {
+    for (int i = 0; i < g_script_n; i++) {
+        if (g_script[i].state == 0 && t >= g_script[i].at_ms) {
+            hle_input_key(1, g_script[i].vk, g_script[i].scan);
+            g_script[i].state = 1;
+            fprintf(stderr, "[joyride] t=%.1fs key vk 0x%02X\n", t / 1000.0, g_script[i].vk);
+        } else if (g_script[i].state == 1 && t >= g_script[i].at_ms + 120) {
+            hle_input_key(0, g_script[i].vk, g_script[i].scan);
+            g_script[i].state = 2;
+        }
+    }
+}
+
 static void frame_hook(const uint8_t *px, int w, int h, int pitch, int bpp) {
     uint32_t now = hle_ticks_ms();
+    run_script(now - g_start_ms);
     if (g_quit_after_ms && now - g_start_ms > g_quit_after_ms) {
         fprintf(stderr, "[joyride] JOYRIDE_QUIT_AFTER reached\n");
         _exit(0);
@@ -145,12 +188,14 @@ int main(int argc, char **argv) {
 
     win32hle_register(joyride_mss);     /* first registration of a name wins */
     win32hle_register(joyride_smack);
+    win32hle_register(joyride_ddraw);
     recomp_host_init();
 
     g_dump_dir = getenv("JOYRIDE_DUMP");
     if (g_dump_dir) mkdirs(g_dump_dir);
     if (getenv("JOYRIDE_QUIT_AFTER")) g_quit_after_ms = (uint32_t)atoi(getenv("JOYRIDE_QUIT_AFTER")) * 1000u;
     g_start_ms = hle_ticks_ms();
+    if (getenv("JOYRIDE_KEYS")) parse_keys(getenv("JOYRIDE_KEYS"));
     hle_screen_frame_hook = frame_hook;
     /* JOYRIDE_HEADLESS=1: no window (scripted runs, CI). */
     int headless = getenv("JOYRIDE_HEADLESS") && atoi(getenv("JOYRIDE_HEADLESS"));

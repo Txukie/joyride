@@ -10,12 +10,14 @@ SDL3 platform layer (SDL_GPU for rendering: Vulkan, Metal or Direct3D 12).
 
 ## Status
 
-**Boots to the main menu on Linux.** The whole executable is lifted to C
-(see [`docs/exe-2002.md`](docs/exe-2002.md)), linked against pcrecomp's
-win32hle Win32 layer plus joyride's own Miles and Smacker modules, and runs
-the game's own code through its C runtime, `WinMain`, SciTech MGL's DirectDraw
-driver and the front end. Not yet: starting a game, the intro movie, and the
-SDL3 + SDL_GPU presenter (bring-up uses win32hle's SDL2 screen).
+**Plays on Linux: menus, city select and Liberty City in game.** The whole
+executable is lifted to C (see [`docs/exe-2002.md`](docs/exe-2002.md)), linked
+against pcrecomp's win32hle Win32 layer plus joyride's own Miles, Smacker and
+DirectDraw additions, and runs the game's own code: its C runtime, `WinMain`,
+SciTech MGL's DirectDraw driver, the front end and the game itself.
+
+Not yet: the intro movie (skipped), sound checked by ear, the SDL3 + SDL_GPU
+presenter (bring-up uses win32hle's SDL2 screen), Windows and macOS builds.
 
 ## Approach
 
@@ -42,7 +44,8 @@ build/joyride "<your install>"   # the folder holding WINO/ and GTADATA/
 
 Nothing in the install is modified: saves, settings and the registry go to
 `~/.local/share/joyride/overlay`. Developer switches: `JOYRIDE_HEADLESS=1`,
-`JOYRIDE_DUMP=<dir>` (one frame per second as PPM), `JOYRIDE_QUIT_AFTER=<s>`.
+`JOYRIDE_DUMP=<dir>` (one frame per second as PPM), `JOYRIDE_QUIT_AFTER=<s>`,
+`JOYRIDE_KEYS="4:RETURN,7:DOWN"` (key presses at times in seconds).
 
 ## Supported game data
 
