@@ -60,19 +60,20 @@ static void joyride_seed_registry(void) {
 
 /* ---- developer switches ------------------------------------------------
  * JOYRIDE_DUMP=<dir>        save the shown frame as <dir>/frame_NNNN.ppm, once a second
+ *                           (JOYRIDE_DUMP_EVERY_MS=<ms> changes the interval; 0 = every frame)
  * JOYRIDE_QUIT_AFTER=<sec>  exit after that many seconds (scripted runs) */
 static const char *g_dump_dir;
 static uint32_t g_quit_after_ms, g_start_ms;
 
-/* JOYRIDE_KEYS="4:RETURN,6.5:DOWN": press (and 120 ms later release) a key at
- * each time in seconds, for driving the game in scripted runs. */
+/* JOYRIDE_KEYS="4:RETURN,6.5:DOWN,10:UP:3": press a key at each time in
+ * seconds and release it 120 ms later, or after the given seconds. */
 static const struct { const char *name; uint32_t vk, scan; } KEYNAMES[] = {
     {"RETURN", 0x0D, 0x1C}, {"ESCAPE", 0x1B, 0x01}, {"SPACE", 0x20, 0x39},
     {"UP", 0x26, 0x148}, {"DOWN", 0x28, 0x150}, {"LEFT", 0x25, 0x14B}, {"RIGHT", 0x27, 0x14D},
     {"CTRL", 0x11, 0x1D}, {"TAB", 0x09, 0x0F}, {"Z", 0x5A, 0x2C}, {"X", 0x58, 0x2D},
 };
 #define MAX_SCRIPT 64
-static struct { uint32_t at_ms, vk, scan; int state; } g_script[MAX_SCRIPT];
+static struct { uint32_t at_ms, hold_ms, vk, scan; int state; } g_script[MAX_SCRIPT];
 static int g_script_n;
 
 static void parse_keys(const char *spec) {
@@ -82,11 +83,15 @@ static void parse_keys(const char *spec) {
         char *colon = strchr(tok, ':');
         if (!colon) continue;
         *colon = 0;
+        uint32_t hold = 120;                               /* "t:KEY:seconds" holds the key */
+        char *dur = strchr(colon + 1, ':');
+        if (dur) { *dur = 0; hold = (uint32_t)(atof(dur + 1) * 1000.0); }
         for (size_t k = 0; k < sizeof KEYNAMES / sizeof KEYNAMES[0]; k++)
             if (!strcasecmp(colon + 1, KEYNAMES[k].name)) {
                 g_script[g_script_n].at_ms = (uint32_t)(atof(tok) * 1000.0);
                 g_script[g_script_n].vk = KEYNAMES[k].vk;
                 g_script[g_script_n].scan = KEYNAMES[k].scan;
+                g_script[g_script_n].hold_ms = hold;
                 g_script_n++;
             }
     }
@@ -98,23 +103,43 @@ static void run_script(uint32_t t) {
             hle_input_key(1, g_script[i].vk, g_script[i].scan);
             g_script[i].state = 1;
             fprintf(stderr, "[joyride] t=%.1fs key vk 0x%02X\n", t / 1000.0, g_script[i].vk);
-        } else if (g_script[i].state == 1 && t >= g_script[i].at_ms + 120) {
+        } else if (g_script[i].state == 1 && t >= g_script[i].at_ms + g_script[i].hold_ms) {
             hle_input_key(0, g_script[i].vk, g_script[i].scan);
             g_script[i].state = 2;
         }
     }
 }
 
+/* JOYRIDE_MEMSNAP="<dir>:<from_s>:<count>": from that time on, save the
+ * game's .data/.bss (0x4AB000..0x791000) at each of <count> frames, for
+ * finding variables by how they change. */
+static char g_snap_dir[PATH_MAX];
+static uint32_t g_snap_from_ms;
+static int g_snap_left;
+
+static void mem_snapshot(uint32_t t) {
+    if (g_snap_left <= 0 || t < g_snap_from_ms) return;
+    static int n;
+    char path[PATH_MAX + 32];
+    snprintf(path, sizeof path, "%s/mem_%04d.bin", g_snap_dir, n++);
+    FILE *f = fopen(path, "wb");
+    if (f) { fwrite(hle_ptr(0x4AB000), 1, 0x791000 - 0x4AB000, f); fclose(f); }
+    g_snap_left--;
+}
+
 static void frame_hook(const uint8_t *px, int w, int h, int pitch, int bpp) {
     uint32_t now = hle_ticks_ms();
     run_script(now - g_start_ms);
+    mem_snapshot(now - g_start_ms);
     if (g_quit_after_ms && now - g_start_ms > g_quit_after_ms) {
         fprintf(stderr, "[joyride] JOYRIDE_QUIT_AFTER reached\n");
         _exit(0);
     }
     static uint32_t last;
     static int n;
-    if (!g_dump_dir || (last && now - last < 1000)) return;
+    static int every = -1;
+    if (every < 0) every = getenv("JOYRIDE_DUMP_EVERY_MS") ? atoi(getenv("JOYRIDE_DUMP_EVERY_MS")) : 1000;
+    if (!g_dump_dir || (last && now - last < (uint32_t)every)) return;
     last = now;
     const uint32_t *pal = NULL;
     const uint8_t *p2; int w2, h2, pitch2, bpp2; unsigned seq;
@@ -196,6 +221,16 @@ int main(int argc, char **argv) {
     if (getenv("JOYRIDE_QUIT_AFTER")) g_quit_after_ms = (uint32_t)atoi(getenv("JOYRIDE_QUIT_AFTER")) * 1000u;
     g_start_ms = hle_ticks_ms();
     if (getenv("JOYRIDE_KEYS")) parse_keys(getenv("JOYRIDE_KEYS"));
+    if (getenv("JOYRIDE_MEMSNAP")) {
+        char spec[PATH_MAX];
+        snprintf(spec, sizeof spec, "%s", getenv("JOYRIDE_MEMSNAP"));
+        char *a = strrchr(spec, ':');
+        if (a) { *a = 0; g_snap_left = atoi(a + 1); }
+        char *b = strrchr(spec, ':');
+        if (b) { *b = 0; g_snap_from_ms = (uint32_t)(atof(b + 1) * 1000.0); }
+        snprintf(g_snap_dir, sizeof g_snap_dir, "%s", spec);
+        mkdirs(g_snap_dir);
+    }
     hle_screen_frame_hook = frame_hook;
     /* JOYRIDE_HEADLESS=1: no window (scripted runs, CI). */
     int headless = getenv("JOYRIDE_HEADLESS") && atoi(getenv("JOYRIDE_HEADLESS"));
