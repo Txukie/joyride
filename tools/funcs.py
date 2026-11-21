@@ -48,6 +48,24 @@ class Image:
         self.reloc_rows = rel
         self.iat = {i["iat_va"]: f'{i["dll"]}!{i["name"] or "#%d" % i["ordinal"]}'
                     for i in self.imports}
+        self.has_relocs = bool(rel)
+        if not self.has_relocs:
+            self._synthesize_data_pointers()
+
+    def _synthesize_data_pointers(self) -> None:
+        """No .reloc: treat every aligned dword in a data section whose value
+        lands in .text as a stored code pointer (vtables, callback tables)."""
+        text_lo, text_hi = self.text_lo, self.text_hi
+        for s in self.pe["sections"]:
+            if s["perms"][2] == "x" or s["name"] == ".rsrc":
+                continue
+            lo = s["va"] - self.base
+            end = lo + min(s["vsize"], s["raw_size"])
+            for o in range(lo, end - 3, 4):
+                v = struct.unpack_from("<I", self.mem, o)[0]
+                if text_lo <= v < text_hi:
+                    self.reloc_rows.append({"at": self.base + o, "target": v,
+                                            "in": s["name"], "to": ".text"})
 
     def in_text(self, va: int) -> bool:
         return self.text_lo <= va < self.text_hi
@@ -88,8 +106,19 @@ class Discovery:
     def jump_table(self, op_mem, table: int) -> list[int]:
         out = []
         va = table
-        while va in self.img.reloc_target and self.img.in_text(self.img.reloc_target[va]):
-            out.append(self.img.reloc_target[va])
+        img = self.img
+        if not img.in_text(table) and not img.has_relocs:
+            pass
+        while len(out) < 1024:
+            if img.has_relocs:
+                if va not in img.reloc_target or not img.in_text(img.reloc_target[va]):
+                    break
+                tgt = img.reloc_target[va]
+            else:
+                tgt = img.u32(va)
+                if not img.in_text(tgt) or va in self.insn:
+                    break
+            out.append(tgt)
             va += 4
             if va in self.jump_tables:   # ran into another table
                 break
@@ -128,6 +157,10 @@ class Discovery:
                 f["max"] = max(f["max"], pc + i.size)
                 m = i.mnemonic
                 # immediates that are relocated code addresses -> callbacks
+                if not self.img.has_relocs and m not in ("jmp", "call") and not m.startswith("j"):
+                    for op in i.operands:
+                        if op.type == X86_OP_IMM and self.img.in_text(op.imm & 0xFFFFFFFF):
+                            self.imm_code_refs.add(op.imm & 0xFFFFFFFF)
                 for k in range(pc, pc + i.size - 3):
                     if k in self.img.reloc_target:
                         tgt = self.img.reloc_target[k]

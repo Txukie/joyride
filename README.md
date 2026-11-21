@@ -1,6 +1,6 @@
 # joyride
 
-A static recompilation of the 1997 Windows release of *Grand Theft Auto*
+A static recompilation of the Windows release of *Grand Theft Auto*
 (DMA Design / BMG Interactive) into portable C++, running on a modern
 SDL3 platform layer (SDL_GPU for rendering: Vulkan, Metal or Direct3D 12).
 
@@ -10,12 +10,13 @@ SDL3 platform layer (SDL_GPU for rendering: Vulkan, Metal or Direct3D 12).
 
 ## Status
 
-Early setup. Nothing builds yet.
+Early setup. The whole executable lifts to C that parses cleanly
+(see [`docs/exe-2002.md`](docs/exe-2002.md)); nothing links or runs yet.
 
 ## Approach
 
-1. **Load** the original `GTAWIN/Grand Theft Auto.exe` (PE32, MSVC, Oct 1997).
-   Its relocation table identifies every pointer in the image.
+1. **Load** `WINO/Grand Theft Auto.exe` (PE32, MSVC 6, Nov 2002) — the build
+   shipped on Steam and as the free Rockstar Classics download.
 2. **Analyse** — discover functions, jump tables and indirect-call targets;
    track progress in a function database.
 3. **Translate** each x86 function to C++ against a guest CPU context and a
@@ -23,6 +24,15 @@ Early setup. Nothing builds yet.
 4. **Replace the OS layer** — DirectDraw, Miles Sound System, Smacker,
    DirectPlay, WinMM and Win32 calls are reimplemented on SDL3 (SDL_GPU, audio streams, input).
 5. **Validate** generated code against traces from the original running game.
+
+## Getting started
+
+```bash
+git clone --recursive https://github.com/Txukie/joyride && cd joyride
+python3 -m venv .venv && .venv/bin/pip install -r tools/requirements.txt
+mkdir -p game_data && cp -r "<your install>/WINO" game_data/
+tools/lift.sh        # writes the generated C to gen/ (never committed)
+```
 
 ## Supported game data
 
@@ -32,8 +42,8 @@ free 2002 Rockstar Classics release (apart from saves), so any of them works. Se
 
 | Source | Executable used for recompilation | Music |
 | --- | --- | --- |
-| Original CD (1997) | `GTAWIN/Grand Theft Auto.exe` | CD audio tracks 2–11 |
-| Steam / Rockstar freeware (2002) | not yet supported (2002 rebuild) | `Music/Track1–10.wav` |
+| Steam / Rockstar freeware (2002) | **`WINO/Grand Theft Auto.exe`** | `Music/Track1–10.wav` |
+| Original CD (1997) | data only (its 1997 exe is not the target) | CD audio tracks 2–11 |
 
 ## License
 
