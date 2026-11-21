@@ -2,7 +2,7 @@
 
 A static recompilation of the 1997 Windows release of *Grand Theft Auto*
 (DMA Design / BMG Interactive) into portable C++, running on a modern
-SDL3/OpenGL platform layer.
+SDL3 platform layer (SDL_GPU for rendering: Vulkan, Metal or Direct3D 12).
 
 > **No game code or data is included in this repository.** You need your own
 > copy of the game. The original executable is read at build time from your
@@ -21,7 +21,7 @@ Early setup. Nothing builds yet.
 3. **Translate** each x86 function to C++ against a guest CPU context and a
    flat guest memory image.
 4. **Replace the OS layer** — DirectDraw, Miles Sound System, Smacker,
-   DirectPlay, WinMM and Win32 calls are reimplemented on SDL3/OpenGL.
+   DirectPlay, WinMM and Win32 calls are reimplemented on SDL3 (SDL_GPU, audio streams, input).
 5. **Validate** generated code against traces from the original running game.
 
 ## Supported game data
