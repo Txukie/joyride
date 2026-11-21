@@ -23,7 +23,26 @@ The intro movie plays (decoded with ffmpeg). The 2002 release itself ships
 with it switched off; joyride turns it back on (`JOYRIDE_NO_INTRO=1` keeps it
 off, any key skips it).
 
+Network play works between joyride instances (see below).
+
 Not yet: Windows and macOS builds.
+
+### Network play
+
+GTA's multiplayer (up to 4 players) runs on joyride's own DirectPlay, so
+joyride plays with joyride, not with the original Windows game.
+
+* **Host:** *Gather Network* → character → city and level → options →
+  connection *Internet TCP/IP Connection (joyride)* → name the session → wait
+  for players → *Enter* to start.
+* **Join:** *Join Network* → character → the same connection → pick the game.
+* Games on the **local network** are found automatically.
+* Over the **internet**, the joining player starts joyride with
+  `JOYRIDE_NET_HOST=<host's address>` and the host forwards **TCP and UDP
+  port 47624** to their machine. `JOYRIDE_NET_PORT` changes the port (same
+  on every machine).
+* A player who leaves is reported by the game ("Connection to … has failed")
+  and the others play on.
 
 ### Keys
 

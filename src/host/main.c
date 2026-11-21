@@ -133,6 +133,7 @@ static void frame_hook(const uint8_t *px, int w, int h, int pitch, int bpp) {
     mem_snapshot(now - g_start_ms);
     if (g_quit_after_ms && now - g_start_ms > g_quit_after_ms) {
         fprintf(stderr, "[joyride] JOYRIDE_QUIT_AFTER reached\n");
+        joyride_dplay_shutdown();                    /* prints the session's message counts */
         _exit(0);
     }
     static uint32_t last;
@@ -214,6 +215,7 @@ int main(int argc, char **argv) {
     win32hle_register(joyride_mss);     /* first registration of a name wins */
     win32hle_register(joyride_smack);
     win32hle_register(joyride_ddraw);
+    win32hle_register(joyride_dplay);
     recomp_host_init();
 
     g_dump_dir = getenv("JOYRIDE_DUMP");

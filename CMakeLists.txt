@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(joyride C)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)   # build/compile_commands.json, for clangd
 
 # The lifted game code is generated from the user's own executable by
 # tools/lift.sh and never committed; the build needs it to exist.
@@ -73,6 +74,7 @@ add_executable(joyride
     src/hle/mss.c
     src/hle/smack.c
     src/hle/ddraw_extra.c
+    src/hle/dplay.c
     $<TARGET_OBJECTS:joyride_gen>)
 target_include_directories(joyride PRIVATE src/hle)
 target_compile_options(joyride PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-format-truncation)
