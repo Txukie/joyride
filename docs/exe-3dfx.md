@@ -91,8 +91,9 @@ The texel loops (all `mov dh, byte ptr [ebx]`, `ebx` = page | v << 8 | u):
 **Bilinear filtering on the GPU, as the 3dfx card did it.** The CPU keeps
 doing what it did for the Voodoo too, all the geometry, and draws its spans
 as always. `tools/postlift.py` splices a call into each 32-bit A and D loop's
-texel fetch: `joyride_tex_fetch` (`src/hle/texfilter.c`) records, for the
-pixel about to be written, where the texel came from:
+texel fetch: `joyride_tex_record` (`src/hle/texfilter_inline.h`, compiled
+into the lifted loops themselves; slow paths in `src/hle/texfilter.c`)
+records, for the pixel about to be written, where the texel came from:
 
 | | bits |
 | --- | --- |
@@ -124,11 +125,12 @@ the loop writes the blend. Same picture; the CPU path costs about twice the
 draw time.
 
 Measured with smooth motion (`src/hle/smooth.c`), the game holding 23.3
-steps a second: at 1024×768, 47 fps filtered on the GPU (37 on the CPU, 58
-sharp); at 2560×1440, 23 fps on the GPU without slowing the game (the CPU
-filter slowed it to 19). What limits it now is the software rasterizer and
-the per-pixel recording; recording per span, or drawing the game's quads on
-the GPU outright, are the next steps.
+steps a second: a filtered draw at 1024×768 takes 6.4 ms with the GPU path
+(41 fps with the CPU filter, 58 sharp); at 2560×1440 the game's own step
+takes 28.6 ms of its 42.9 with the GPU path, so the game keeps its speed
+(the CPU filter slows it to 20 steps a second). What limits it now is the
+software rasterizer itself; drawing the game's quads on the GPU outright
+is the next step.
 
 The F12 settings overlay switches it (`JOYRIDE_FILTER=0|1|cpu` for one run).
 `JOYRIDE_HEADLESS_GPU=1` with `JOYRIDE_GPU_DUMP=<dir>` filters without a

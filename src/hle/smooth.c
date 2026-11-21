@@ -255,6 +255,10 @@ void joyride_smooth_wait(void) {
         now = SDL_GetTicksNS();
         uint64_t slot = joyride_screen_next_slot(), at = now + draw_ns;
         if (slot > at) at = slot;
+        if (dbg && g_step % 50 == 0)
+            fprintf(stderr, "[smooth]   now +%.1f slot +%.1f at +%.1f due +%.1f\n", (double)(int64_t)(now - start) / 1e6,
+                    slot ? (double)(int64_t)(slot - start) / 1e6 : -1.0, (double)(int64_t)(at - start) / 1e6,
+                    (double)(int64_t)(step_due() - start) / 1e6);
         if (at + 2000000 >= step_due()) break;              /* would not be up in time */
         int32_t t = at <= start ? 0 : (int32_t)(((at - start) << 16) / STEP_NS);
         if (t > 65536) t = 65536;

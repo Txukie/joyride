@@ -51,7 +51,8 @@ set(JOYRIDE_DEFS RECOMP_MEM_BASE=0x100000000000ull)
 add_library(joyride_gen OBJECT ${JOYRIDE_GEN_SOURCES})
 target_include_directories(joyride_gen PRIVATE "${PCRECOMP}/runtime/recomp32" "${JOYRIDE_GEN_DIR}")
 target_compile_definitions(joyride_gen PRIVATE ${JOYRIDE_DEFS})
-target_compile_options(joyride_gen PRIVATE -O1 -w -include "${JOYRIDE_GEN_DIR}/recomp_funcs.h")
+target_compile_options(joyride_gen PRIVATE -O1 -w "SHELL:-include ${JOYRIDE_GEN_DIR}/recomp_funcs.h"
+    "SHELL:-include ${CMAKE_SOURCE_DIR}/src/hle/texfilter_inline.h")   # the filter's per-pixel part, inlined
 
 # --- pcrecomp's Win32 layer, minus its selftests and the four files that use
 # SDL2: screen.c and present.c are replaced by joyride's SDL3/SDL_GPU screen,

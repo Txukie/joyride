@@ -21,7 +21,8 @@
  *
  * Two ways to do it (joyride_texfilter):
  *   2, on the GPU, as the 3dfx card did: the loops draw the plain texel as
- *      always and joyride_tex_fetch only records, per pixel, where it came
+ *      always and joyride_tex_record (texfilter_inline.h, compiled into the
+ *      loops) only records, per pixel, where it came
  *      from (texture page slot, palette slot, position to 1/64 texel, the
  *      clamp, and a 17-bit check of the colour written); the presenter
  *      uploads that, the pages and palettes that changed, and
@@ -127,9 +128,20 @@ void joyride_tex_begin(uint32_t tile) {
 
 /* ---- the GPU path: what each pixel was drawn from ------------------------ */
 
-static uint32_t *g_gb;              /* 2 words a pixel, rows of the surface's pitch */
+/* Shared with the per-pixel part, texfilter_inline.h, compiled into the
+ * spliced loops themselves. */
+uint32_t *joyride_gb;               /* 2 words a pixel, rows of the surface's pitch */
+uint32_t joyride_gb_n;              /* pixels in it */
+int joyride_gb_used;                /* something recorded since the last frame */
+uint32_t joyride_gb_last_page = ~0u, joyride_gb_last_pal = ~0u;   /* a span keeps to one of each */
+uint32_t joyride_gb_last_page_slot, joyride_gb_last_pal_slot;
+#define g_gb joyride_gb
+#define g_gb_used joyride_gb_used
+#define g_last_page joyride_gb_last_page
+#define g_last_pal joyride_gb_last_pal
+#define g_last_page_slot joyride_gb_last_page_slot
+#define g_last_pal_slot joyride_gb_last_pal_slot
 static int g_gw, g_gh;              /* pixels a row (pitch / 4), rows */
-static int g_gb_used;               /* something recorded since the last frame */
 
 /* The record, 2 words a pixel (shaders/texfilter.frag reads it):
  *   0: u | v << 14 | check >> 13 << 28, u and v 8.6 in the page
@@ -158,8 +170,6 @@ static int g_npals;
 static uint8_t *g_frozen[256];
 static uint8_t g_free[256];
 static int g_nfree;
-static uint32_t g_last_pal = ~0u, g_last_page = ~0u;   /* a span keeps to one of each */
-static int g_last_pal_slot, g_last_page_slot;
 static int g_resets;
 static void reset_slots(void) {
     g_resets++;
@@ -185,7 +195,7 @@ static int new_slot(void) {
 }
 
 static int page_slot(uint32_t page) {
-    if (page == g_last_page) return g_last_page_slot;
+    if (page == g_last_page) return (int)g_last_page_slot;
     uint32_t k = page >> 16;
     int s = g_page_slot[k];
     if (!s) {
@@ -193,7 +203,7 @@ static int page_slot(uint32_t page) {
         g_page_slot[k] = (uint8_t)s, g_page_addr[s] = page, g_page_hash[s] = 0;
     }
     g_page_used[s] = 1;
-    g_last_page = page, g_last_page_slot = s;
+    g_last_page = page, g_last_page_slot = (uint32_t)s;
     return s;
 }
 
@@ -212,22 +222,22 @@ void joyride_tex_overwrite(uint32_t dst) {
 
 
 static int pal_slot(uint32_t pal) {
-    if (pal == g_last_pal) return g_last_pal_slot;
+    if (pal == g_last_pal) return (int)g_last_pal_slot;
     for (;;) {
         uint32_t h = (pal * 2654435761u) >> 20;            /* 12 bits */
         for (int i = 0; i < 64; i++) {
             uint32_t *e = &g_pal_key[2 * ((h + (uint32_t)i) & (NPAL - 1))];
             if (e[1] && e[0] == pal) {
                 g_pal_used[e[1] - 1] = 1;
-                g_last_pal = pal, g_last_pal_slot = (int)e[1] - 1;
-                return g_last_pal_slot;
+                g_last_pal = pal, g_last_pal_slot = e[1] - 1;
+                return (int)g_last_pal_slot;
             }
             if (!e[1]) {
                 if (g_npals >= MAXPALS) break;
                 int s = g_npals++;
                 e[0] = pal, e[1] = (uint32_t)s + 1;
                 g_pal_addr[s] = pal, g_pal_hash[s] = 0, g_pal_used[s] = 1;
-                g_last_pal = pal, g_last_pal_slot = s;
+                g_last_pal = pal, g_last_pal_slot = (uint32_t)s;
                 return s;
             }
         }
@@ -235,28 +245,11 @@ static int pal_slot(uint32_t pal) {
     }
 }
 
-static inline uint32_t check17(uint32_t c) {
-    c &= 0xFFFFFF;
-    return (c ^ (c >> 17) ^ (c << 7)) & 0x1FFFFu;
-}
 
-/* Spliced at each hooked texel fetch: `dst` is the pixel the loop is about
- * to write, the rest as for joyride_bilerp32. */
-void joyride_tex_fetch(uint32_t dst, uint32_t addr, uint32_t fu, uint32_t fv, uint32_t pal, uint32_t transparent) {
-    if (joyride_texfilter == 1) { joyride_texc = joyride_bilerp32(addr, fu, fv, pal, transparent); return; }
-    uint32_t t = GUEST(addr)[0];
-    if (transparent && !t) return;                           /* the loop skips this texel */
-    uint32_t off = dst - MEM32(0x503228);                    /* row 0 of the surface drawn into */
-    uint32_t i = off >> 2;
-    if (!g_gb || (off & 3) || i >= (uint32_t)(g_gw * g_gh)) return;
-    pal &= 0xFFFF00FFu;
-    uint32_t u = (addr & 0xFF) << 6 | (fu & 0xFFFF) >> 10, v = (addr >> 8 & 0xFF) << 6 | (fv & 0xFFFF) >> 10;
-    uint32_t c = check17(colour(pal, t));
-    g_gb[2 * i] = u | v << 14 | (c >> 13) << 28;
-    g_gb[2 * i + 1] = (uint32_t)page_slot(addr & ~0xFFFFu) | (uint32_t)pal_slot(pal) << 7 |
-                      (transparent ? 1u : 0u) << 17 | joyride_texclamp << 18 | (c & 0x1FFFu) << 19;
-    g_gb_used = 1;
-}
+/* The per-pixel recording is texfilter_inline.h, in the loops; these are
+ * its slow paths, for a page or palette other than the last one. */
+uint32_t joyride_tex_page_slot(uint32_t page) { return (uint32_t)page_slot(page); }
+uint32_t joyride_tex_pal_slot(uint32_t pal) { return (uint32_t)pal_slot(pal); }
 
 /* ---- for the presenter ---------------------------------------------------- */
 
@@ -266,6 +259,7 @@ void joyride_gbuf_size(int pitch_px, int rows) {
     free(g_gb);
     g_gw = pitch_px, g_gh = rows;
     g_gb = calloc((size_t)pitch_px * (size_t)rows * 2, 4);
+    joyride_gb_n = g_gb ? (uint32_t)pitch_px * (uint32_t)rows : 0;
     g_gb_used = 0;
 }
 

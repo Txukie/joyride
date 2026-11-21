@@ -56,9 +56,9 @@ TEXENTRY = {0x00497035: 1, 0x00497332: 1, 0x00497710: 1, 0x0049787C: 0, 0x004979
 def texhook_lines():
     after = {}
     for fetch, col, reg, dst, fu, fv, tr in TEXHOOKS:
+        # joyride_tex_record is inline (src/hle/texfilter_inline.h, force-included)
         after[fetch] = (f"{{ extern uint32_t joyride_texfilter; "
-                        f"extern void joyride_tex_fetch(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t); "
-                        f"if (joyride_texfilter) joyride_tex_fetch({dst}, ebx, {fu}, {fv}, edx, {tr}); }}")
+                        f"if (joyride_texfilter) joyride_tex_record({dst}, ebx, {fu}, {fv}, edx, {tr}); }}")
         after[col] = (f"{{ extern uint32_t joyride_texfilter, joyride_texc; "
                       f"if (joyride_texfilter == 1) {reg} = joyride_texc; }}")
     for a, tile in TEXENTRY.items():
