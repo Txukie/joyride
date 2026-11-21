@@ -29,6 +29,20 @@ find_package(SDL3 REQUIRED CONFIG)
 find_package(SDL3_ttf REQUIRED CONFIG)
 find_package(Threads REQUIRED)
 
+# ffmpeg decodes the intro movie (Smacker). Optional: without it the game
+# skips the movie.
+option(JOYRIDE_WITH_FFMPEG "Play the intro movie through ffmpeg" ON)
+if(JOYRIDE_WITH_FFMPEG)
+    find_package(PkgConfig)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(FFMPEG IMPORTED_TARGET libavformat libavcodec libavutil)
+    endif()
+    if(NOT FFMPEG_FOUND)
+        message(WARNING "ffmpeg (libavformat, libavcodec, libavutil) not found: the intro movie will be skipped")
+        set(JOYRIDE_WITH_FFMPEG OFF)
+    endif()
+endif()
+
 # Guest memory: one 4 GB block at this host address; ADDR(va) adds it as a constant.
 set(JOYRIDE_DEFS RECOMP_MEM_BASE=0x100000000000ull)
 
@@ -63,3 +77,7 @@ add_executable(joyride
 target_include_directories(joyride PRIVATE src/hle)
 target_compile_options(joyride PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-format-truncation)
 target_link_libraries(joyride PRIVATE win32hle)
+if(JOYRIDE_WITH_FFMPEG)
+    target_compile_definitions(joyride PRIVATE JOYRIDE_WITH_FFMPEG)
+    target_link_libraries(joyride PRIVATE PkgConfig::FFMPEG)
+endif()

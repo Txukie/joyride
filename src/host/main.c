@@ -249,6 +249,13 @@ int main(int argc, char **argv) {
     if (fresh) joyride_seed_registry();
     int rc = strict ? recomp_host_boot(exe) : recomp_host_boot_permissive(exe);
     if (rc) { fprintf(stderr, "joyride: boot failed (%d)\n", rc); return 70; }
+
+    /* The 2002 release ships with its intro movie switched off: the flag the
+     * movie player checks (0x4AC06C, "skip the movie") starts at 1 in the
+     * executable's data and nothing clears it, though MOVIE.SMK is still
+     * installed. Clear it so the intro plays, unless JOYRIDE_NO_INTRO=1. */
+    if (!(getenv("JOYRIDE_NO_INTRO") && atoi(getenv("JOYRIDE_NO_INTRO"))))
+        MEM32(0x4AC06Cu) = 0;
     fprintf(stderr, "[joyride] install %s, overlay %s\n", root, overlay);
     return (int)recomp_host_run();
 }

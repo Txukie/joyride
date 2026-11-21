@@ -19,7 +19,11 @@ SciTech MGL's DirectDraw driver, the front end and the game itself.
 The platform layer is SDL3 only: window, input and audio through SDL3, the
 picture through SDL_GPU (Vulkan, Metal or Direct3D 12).
 
-Not yet: the intro movie (skipped), Windows and macOS builds.
+The intro movie plays (decoded with ffmpeg). The 2002 release itself ships
+with it switched off; joyride turns it back on (`JOYRIDE_NO_INTRO=1` keeps it
+off, any key skips it).
+
+Not yet: Windows and macOS builds.
 
 ### Keys
 
@@ -46,7 +50,8 @@ Not yet: the intro movie (skipped), Windows and macOS builds.
 ```bash
 git clone --recursive https://github.com/Txukie/joyride && cd joyride
 python3 -m venv .venv && .venv/bin/pip install -r tools/requirements.txt
-# needs: CMake, Ninja, a C compiler, SDL3 and SDL3_ttf (development files)
+# needs: CMake, Ninja, a C compiler, SDL3 and SDL3_ttf (development files);
+# optional: ffmpeg's libavformat/libavcodec for the intro movie
 mkdir -p game_data && cp -r "<your install>/WINO" game_data/
 tools/lift.sh        # writes the generated C to gen/ (never committed)
 cmake -S . -B build -G Ninja && cmake --build build
