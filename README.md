@@ -10,8 +10,12 @@ SDL3 platform layer (SDL_GPU for rendering: Vulkan, Metal or Direct3D 12).
 
 ## Status
 
-Early setup. The whole executable lifts to C that parses cleanly
-(see [`docs/exe-2002.md`](docs/exe-2002.md)); nothing links or runs yet.
+**Boots to the main menu on Linux.** The whole executable is lifted to C
+(see [`docs/exe-2002.md`](docs/exe-2002.md)), linked against pcrecomp's
+win32hle Win32 layer plus joyride's own Miles and Smacker modules, and runs
+the game's own code through its C runtime, `WinMain`, SciTech MGL's DirectDraw
+driver and the front end. Not yet: starting a game, the intro movie, and the
+SDL3 + SDL_GPU presenter (bring-up uses win32hle's SDL2 screen).
 
 ## Approach
 
@@ -32,7 +36,13 @@ git clone --recursive https://github.com/Txukie/joyride && cd joyride
 python3 -m venv .venv && .venv/bin/pip install -r tools/requirements.txt
 mkdir -p game_data && cp -r "<your install>/WINO" game_data/
 tools/lift.sh        # writes the generated C to gen/ (never committed)
+cmake -S . -B build -G Ninja && cmake --build build
+build/joyride "<your install>"   # the folder holding WINO/ and GTADATA/
 ```
+
+Nothing in the install is modified: saves, settings and the registry go to
+`~/.local/share/joyride/overlay`. Developer switches: `JOYRIDE_HEADLESS=1`,
+`JOYRIDE_DUMP=<dir>` (one frame per second as PPM), `JOYRIDE_QUIT_AFTER=<s>`.
 
 ## Supported game data
 
