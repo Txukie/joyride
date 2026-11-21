@@ -9,7 +9,10 @@
  * Also replaces IDirectDrawSurface::Flip (see x_Flip). Vtables are built by
  * resolving method names, and the first registration of a name wins.
  */
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "win32hle.h"
 #include "ddraw_int.h"
@@ -36,7 +39,22 @@ static void x_DirectDrawCreateClipper(void) {
  * With the camera moving (it climbs and drops with the player's speed) the
  * picture flickered between two heights: "the camera zooms in and out".
  * Copying keeps each surface's memory where the game expects it. */
+/* JOYRIDE_FPS=1: print the game's frame rate (flips per second) every 5 s */
+static void count_flip(void) {
+    static int on = -1, n;
+    static struct timespec t0;
+    if (on < 0) on = getenv("JOYRIDE_FPS") && atoi(getenv("JOYRIDE_FPS"));
+    if (!on) return;
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    if (!t0.tv_sec) t0 = t;
+    n++;
+    double dt = (double)(t.tv_sec - t0.tv_sec) + (double)(t.tv_nsec - t0.tv_nsec) / 1e9;
+    if (dt >= 5.0) { fprintf(stderr, "[joyride] %.1f fps\n", n / dt); n = 0; t0 = t; }
+}
+
 static void x_Flip(void) {
+    count_flip();
     if (hle_dd_access_hook) hle_dd_access_hook();
     surf_t *s = hle_dd_surf(A32(0));
     if (s && s->back && s->back->px && s->px) {

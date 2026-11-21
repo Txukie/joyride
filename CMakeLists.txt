@@ -76,6 +76,7 @@ add_executable(joyride
     src/hle/ddraw_extra.c
     src/hle/dplay.c
     src/hle/texfilter.c
+    src/hle/display.c
     $<TARGET_OBJECTS:joyride_gen>)
 target_include_directories(joyride PRIVATE src/hle)
 target_compile_options(joyride PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-format-truncation)

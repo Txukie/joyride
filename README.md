@@ -29,6 +29,19 @@ Bilinear texture filtering, the 3dfx version's look, is on by default in
 32-bit colour modes (F10 toggles, `JOYRIDE_FILTER=0` starts with it off);
 see [`docs/exe-3dfx.md`](docs/exe-3dfx.md).
 
+### Screen size
+
+The game plays at 1024×768 on its own. `JOYRIDE_RES=<width>x<height>` (or
+`JOYRIDE_RES=desktop`) plays at another size, widescreen and ultrawide
+included: the view keeps the game's zoom from top to bottom and shows more
+of the city to the sides, instead of the game's own behaviour of zooming in.
+Sizes from 640×480 to 3840×1600 that joyride's display list offers (the
+common 4:3, 16:9, 16:10 and 21:9 sizes, and your desktop's); the log lists
+the game's modes. Menus stay 640×480.
+
+The renderer is software, as in the original: up to 2560×1440 runs at full
+speed with filtering; 3440×1440 needs filtering off (F10) to keep it.
+
 Not yet: Windows and macOS builds.
 
 ### Network play
@@ -87,7 +100,8 @@ Nothing in the install is modified: saves, settings and the registry go to
 `JOYRIDE_DUMP=<dir>` (one frame per second as PPM), `JOYRIDE_QUIT_AFTER=<s>`,
 `JOYRIDE_KEYS="4:RETURN,15:UP:6"` (key presses, or holds, at times in seconds),
 `JOYRIDE_MAX_FPS` (default 60, 0 = unlimited), `JOYRIDE_SCALE=sharp|smooth|nearest|integer`,
-`JOYRIDE_GPU_DEBUG=1` (SDL_GPU validation).
+`JOYRIDE_GPU_DEBUG=1` (SDL_GPU validation), `JOYRIDE_FPS=1` (the game's frame
+rate every 5 s; it should hold 23.3).
 
 ## Supported game data
 

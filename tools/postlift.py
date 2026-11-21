@@ -60,11 +60,32 @@ def texhook_lines():
         after[col] = (f"{{ extern uint32_t joyride_texfilter, joyride_texc; "
                       f"if (joyride_texfilter) {reg} = joyride_texc; }}")
     for a, tile in TEXENTRY.items():
-        after[a] = f"{{ extern uint32_t joyride_texclamp; joyride_texclamp = {tile}; }}"
+        after[a] = f"{{ extern void joyride_tex_begin(uint32_t); joyride_tex_begin({tile}); }}"
     return after
 
 
 TEXAFTER = texhook_lines()
+
+# The screen size in play (src/hle/display.c, JOYRIDE_RES): the getter of
+# the mode index (0x414D30 `mov al, byte ptr [0x503224]`), and the mode
+# list filter (after 0x415415, before `cmp ecx, 0x640`: ecx the width,
+# [esp + 0x18] the height), which may skip to its "keep" path 0x41545C.
+TEXAFTER[0x00414D30] = ("{ extern uint32_t joyride_pick_mode(uint32_t); "
+                        "SET_LO8(eax, joyride_pick_mode(LO8(eax))); }")
+TEXAFTER[0x00415415] = ("{ extern int joyride_pick_mode_allowed(uint32_t, uint32_t); "
+                        "if (joyride_pick_mode_allowed(ecx, MEM32(esp + 0x18))) goto L_0041545C; }")
+# The camera (0x43BB30, 0x43C9C3: scale = view width * zoom / 320) and the
+# y squash for non-4:3 modes (0x46456E), both made aspect-neutral when the
+# size is joyride's: the scale follows the height, so wider shows more.
+for _a in (0x0043BB30, 0x0043C9C3):
+    TEXAFTER[_a] = ("{ extern uint32_t joyride_view_scale(uint32_t, uint32_t, uint32_t); "
+                    "MEM32(ecx + 0x24) = joyride_view_scale(MEM32(ecx + 0xC), edi, edx); }")
+TEXAFTER[0x0046456E] = ("{ extern int joyride_square_pixels(void); "
+                        "if (joyride_square_pixels()) MEM8(ecx + 0x74F18C) = 0; }")
+# MGL's mode size lookup (0x48B770), right after it stores the height
+# (0x48BFE2 `mov [ecx], ebx`; the width went to [[esp + 0x420]]).
+TEXAFTER[0x0048BFE2] = ("{ extern void joyride_mode_size(uint32_t, uint32_t); "
+                        "joyride_mode_size(MEM32(esp + 0x420), ecx); }")
 ADDR = re.compile(r"/\* 0x([0-9A-F]{8}): ")
 
 GOTO = re.compile(r"goto L_([0-9A-F]{8});.*/\* 0x([0-9A-F]{8}): (j\w*|loop\w*) ")
@@ -85,9 +106,9 @@ def process(path: str) -> int:
                 added += 1
         out.append(line)
         a = ADDR.search(line)
-        if a and int(a.group(1), 16) in TEXAFTER and line.lstrip().startswith(("SET_HI8", "edx =", "esi =", "PUSH32(esp, ebp)")):
+        if a and int(a.group(1), 16) in TEXAFTER and line.lstrip().startswith(("SET_HI8", "SET_LO8(eax, MEM8(0x503224))", "esp = esp + 0x10u", "MEM32(ecx) = ebx", "MEM32(ecx + 0x24) = edx", "MEM8(ecx + 0x74F18C)", "edx =", "esi =", "PUSH32(esp, ebp)")):
             nxt = lines[i + 1] if i + 1 < len(lines) else ""
-            if TEXMARK not in nxt:
+            if "joyride_" not in nxt:
                 indent = line[:len(line) - len(line.lstrip())]
                 out.append(f"{indent}{TEXAFTER[int(a.group(1), 16)]}\n")
                 hooked += 1
@@ -109,7 +130,7 @@ def main() -> int:
             total += process(os.path.join(d, name))
     hooked = getattr(process, "hooked", 0)
     print(f"postlift: {total - hooked} loop back-edges given a RECOMP_BACKEDGE(), "
-          f"{hooked} texture filter splices (of {2 * len(TEXHOOKS) + len(TEXENTRY)} sites)")
+          f"{hooked} texture filter splices (of {2 * len(TEXHOOKS) + len(TEXENTRY)} sites) and the mode picker")
     return 0
 
 

@@ -71,6 +71,7 @@ static const struct { const char *name; uint32_t vk, scan; } KEYNAMES[] = {
     {"RETURN", 0x0D, 0x1C}, {"ESCAPE", 0x1B, 0x01}, {"SPACE", 0x20, 0x39},
     {"UP", 0x26, 0x148}, {"DOWN", 0x28, 0x150}, {"LEFT", 0x25, 0x14B}, {"RIGHT", 0x27, 0x14D},
     {"CTRL", 0x11, 0x1D}, {"TAB", 0x09, 0x0F}, {"Z", 0x5A, 0x2C}, {"X", 0x58, 0x2D},
+    {"F8", 0x77, 0x42}, {"F9", 0x78, 0x43}, {"F10", 0x79, 0x44},
 };
 #define MAX_SCRIPT 64
 static struct { uint32_t at_ms, hold_ms, vk, scan; int state; } g_script[MAX_SCRIPT];
@@ -252,6 +253,7 @@ int main(int argc, char **argv) {
     if (fresh) joyride_seed_registry();
     int rc = strict ? recomp_host_boot(exe) : recomp_host_boot_permissive(exe);
     if (rc) { fprintf(stderr, "joyride: boot failed (%d)\n", rc); return 70; }
+    joyride_display_setup();
 
     /* The 2002 release ships with its intro movie switched off: the flag the
      * movie player checks (0x4AC06C, "skip the movie") starts at 1 in the
