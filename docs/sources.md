@@ -36,7 +36,8 @@ through Miles `AIL_redbook_*`; the Steam executable opens the WAV files.
 | File size | 909,824 | 774,144 |
 | `.text` | 0xB69A0 | 0xA53D9 |
 | `.reloc` | yes (0x13EA0) | no |
-| Imports | ddraw, mss32, smackw32, DPLAYX, WINMM, WDIR32, wing32, GDI32, USER32, KERNEL32, ADVAPI32 | same set |
+| Static imports | mss32, smackw32, DPLAYX, WINMM, GDI32, USER32, KERNEL32, ADVAPI32 | same set |
+| Loaded at run time (MGL) | ddraw, wing32, WDIR32 | same set |
 
 The supporting DLLs (`mss32`, `smackw32`, `pmpro*`, `wdir*`) are identical
 between the two releases.
