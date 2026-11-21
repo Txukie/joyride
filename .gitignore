@@ -29,3 +29,6 @@ traces/
 __pycache__/
 .DS_Store
 *.swp
+
+# Python tooling environment
+.venv/
