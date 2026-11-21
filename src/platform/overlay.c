@@ -26,7 +26,7 @@
 #include "win32hle.h"
 #include "joyride_hle.h"
 
-joyride_settings joyride_cfg = { 0, 0, 1, 0, 0, 1 };
+joyride_settings joyride_cfg = { 0, 0, 1, 0, 0, 1, 0 };
 static char g_path[4096];
 
 /* ---- settings file ------------------------------------------------------- */
@@ -47,6 +47,7 @@ void joyride_config_load(const char *path) {
                 if (!strcmp(val, joyride_screen_scaling_name(i))) joyride_cfg.scaling = i;
         } else if (!strcmp(key, "fullscreen")) joyride_cfg.fullscreen = atoi(val) != 0;
         else if (!strcmp(key, "smooth")) joyride_cfg.smooth = atoi(val) != 0;
+        else if (!strcmp(key, "renderer")) joyride_cfg.hwrender = !strcmp(val, "gpu");
     }
     if (f) fclose(f);
 
@@ -64,6 +65,7 @@ void joyride_config_load(const char *path) {
     }
     if ((e = getenv("JOYRIDE_FILTER")) && *e) joyride_cfg.filter = *e != '0';    /* "cpu": on, on the CPU */
     if ((e = getenv("JOYRIDE_SMOOTH")) && *e) joyride_cfg.smooth = *e != '0';
+    if ((e = getenv("JOYRIDE_RENDERER")) && *e) joyride_cfg.hwrender = !strcmp(e, "gpu");
     if ((e = getenv("JOYRIDE_SCALE")) && *e)
         for (int i = 0; joyride_screen_scaling_name(i); i++)
             if (!strcmp(e, joyride_screen_scaling_name(i))) joyride_cfg.scaling = i;
@@ -82,13 +84,14 @@ void joyride_config_save(void) {
     fprintf(f, "scaling=%s\n", joyride_screen_scaling_name(joyride_cfg.scaling));
     fprintf(f, "fullscreen=%d\n", joyride_cfg.fullscreen);
     fprintf(f, "smooth=%d\n", joyride_cfg.smooth);
+    fprintf(f, "renderer=%s\n", joyride_cfg.hwrender ? "gpu" : "software");
     fclose(f);
     rename(tmp, g_path);
 }
 
 /* ---- the menu ------------------------------------------------------------ */
 
-enum { ITEM_RES, ITEM_FILTER, ITEM_SMOOTH, ITEM_SCALING, ITEM_FULLSCREEN, ITEM_RESUME, ITEM_COUNT };
+enum { ITEM_RES, ITEM_RENDERER, ITEM_FILTER, ITEM_SMOOTH, ITEM_SCALING, ITEM_FULLSCREEN, ITEM_RESUME, ITEM_COUNT };
 
 static int g_open, g_sel;
 static int g_sizes[HLE_DD_MAX_MODES + 1][2], g_nsizes;   /* [0] = the game's own */
@@ -130,6 +133,12 @@ static void change(int dir) {
     case ITEM_FILTER:
         joyride_cfg.filter = !joyride_cfg.filter;
         joyride_texfilter_set(joyride_cfg.filter);
+        joyride_config_save();
+        break;
+    case ITEM_RENDERER:
+        if (!joyride_cfg.hwrender && !joyride_screen_hwrender()) break;   /* no GPU path here */
+        joyride_cfg.hwrender = !joyride_cfg.hwrender;
+        joyride_hwrender = joyride_cfg.hwrender;
         joyride_config_save();
         break;
     case ITEM_SMOOTH:
@@ -230,6 +239,11 @@ void joyride_overlay_draw(uint32_t *bgra, int w, int h) {
             snprintf(label, sizeof label, "Textures");
             snprintf(val, sizeof val, "%s", !joyride_cfg.filter ? "sharp" :
                      joyride_texfilter == 2 ? "bilinear (3dfx, GPU)" : "bilinear (3dfx, CPU)");
+            break;
+        case ITEM_RENDERER:
+            snprintf(label, sizeof label, "Renderer");
+            snprintf(val, sizeof val, "%s", joyride_cfg.hwrender ? "GPU (3dfx-style)" :
+                     joyride_screen_hwrender() ? "software (original)" : "software (no GPU path)");
             break;
         case ITEM_SMOOTH:
             snprintf(label, sizeof label, "Motion");

@@ -258,6 +258,7 @@ int main(int argc, char **argv) {
     joyride_config_load(cfgfile);
     joyride_texfilter_set(joyride_cfg.filter);
     joyride_smooth = joyride_cfg.smooth;
+    joyride_hwrender = joyride_cfg.hwrender;
     joyride_screen_scaling(joyride_cfg.scaling);
     if (joyride_cfg.fullscreen && !headless) joyride_screen_fullscreen(1);
 

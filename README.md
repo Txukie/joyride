@@ -36,6 +36,12 @@ size, F12 or Esc closes. They are kept in `~/.local/share/joyride/joyride.cfg`.
   sizes, and your desktop's), changed in play. Wider screens show more of
   the city to the sides at the game's usual zoom, instead of the game's own
   behaviour of zooming in. Menus stay 640×480.
+* **Renderer** — software (default: the game's own rasterizer, as
+  released) or GPU: the world drawn by the graphics card the way the 3dfx
+  version did it, the CPU keeping only the geometry. Same picture; it keeps
+  the full frame rate at sizes the software renderer can't (2560×1440 at 60
+  fps, 3440×1440 at 55, against 21 and 18). Vulkan only for now. See
+  [`docs/exe-3dfx.md`](docs/exe-3dfx.md).
 * **Textures** — bilinear filtering, the 3dfx version's look (default), or
   sharp. Filtered on the GPU like the 3dfx card did (Vulkan; on the CPU
   elsewhere); see [`docs/exe-3dfx.md`](docs/exe-3dfx.md). 32-bit colour only.
@@ -51,10 +57,12 @@ size, F12 or Esc closes. They are kept in `~/.local/share/joyride/joyride.cfg`.
   nearest, integer.
 * **Fullscreen** (also F11 or Alt+Enter).
 
-The renderer is software, as in the original: up to 2560×1440 keeps the
-game's full speed with filtering; larger sizes may need sharp textures.
-`JOYRIDE_RES=<w>x<h>|desktop|game`, `JOYRIDE_FILTER=0|1`, `JOYRIDE_SMOOTH=0|1`
-and `JOYRIDE_SCALE=<mode>` override the file for one run.
+With the software renderer, up to 2560×1440 keeps the game's full speed
+with filtering, but with few frames between steps; the GPU renderer keeps
+the display's rate there.
+`JOYRIDE_RES=<w>x<h>|desktop|game`, `JOYRIDE_RENDERER=software|gpu`,
+`JOYRIDE_FILTER=0|1`, `JOYRIDE_SMOOTH=0|1` and `JOYRIDE_SCALE=<mode>` override
+the file for one run.
 
 Not yet: Windows and macOS builds.
 
@@ -79,7 +87,7 @@ joyride plays with joyride, not with the original Windows game.
 
 | Key | |
 | --- | --- |
-| F12 | settings: screen size, textures, motion, scaling, fullscreen |
+| F12 | settings: screen size, renderer, textures, motion, scaling, fullscreen |
 | F11, Alt+Enter | fullscreen |
 | Esc, then Enter | quit (the game's own menu); closing the window twice also quits |
 

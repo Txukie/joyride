@@ -210,7 +210,7 @@ static int page_slot(uint32_t page) {
 /* Spliced at the tile converter's entry (0x49B044): about to write the
  * 64x64 tile at `dst` (its rotated copy in the cache). */
 void joyride_tex_overwrite(uint32_t dst) {
-    if (joyride_texfilter != 2) return;
+    if (joyride_texfilter != 2 && !joyride_hwrender) return;
     uint32_t k = dst >> 16;
     int s = g_page_slot[k];
     if (!s || !g_page_used[s] || g_frozen[s]) return;
@@ -262,6 +262,8 @@ void joyride_gbuf_size(int pitch_px, int rows) {
     joyride_gb_n = g_gb ? (uint32_t)pitch_px * (uint32_t)rows : 0;
     g_gb_used = 0;
 }
+
+void joyride_gbuf_dims(int *pitch_px, int *rows) { *pitch_px = g_gw, *rows = g_gh; }
 
 /* the recording of the frame just drawn, if any */
 int joyride_gbuf_frame(const uint32_t **gb, int *pitch_px, int *rows) {

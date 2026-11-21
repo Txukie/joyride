@@ -31,6 +31,23 @@ void joyride_display_apply(void);
 void joyride_display_current(int *w, int *h);
 int  joyride_display_valid(int w, int h);
 
+/* the hardware renderer (hwrender.c): the world's quads, drawn by the GPU */
+#define JOYRIDE_KEY 0xA5FF00FFu            /* the surface before the CPU draws (no game colour has A5 on top) */
+#define JOYRIDE_QUAD_VERTICAL 1u           /* spans run down, not across */
+#define JOYRIDE_QUAD_KEYED    2u           /* colour 0 is see-through */
+#define JOYRIDE_QUAD_BLEND    4u           /* 50/50 with what is below */
+#define JOYRIDE_QUAD_TILE     8u           /* a 64x64 world tile: filter within it */
+typedef struct {                           /* std430, as shaders/hwquad.vert reads it */
+    float x[4], y[4];                      /* corners, game pixels */
+    float u[4], v[4];                      /* page coordinates, texels */
+    uint32_t page, pal, mode, pad;         /* texture page slot, palette slot, JOYRIDE_QUAD_* */
+} joyride_quad;
+extern int joyride_hwrender;
+void joyride_hw_begin(void);
+int  joyride_hw_quads(const joyride_quad **q);   /* -1: not in use this frame */
+void joyride_hw_done(void);
+void joyride_gbuf_dims(int *pitch_px, int *rows);
+
 /* frames between the game's steps (smooth.c) */
 extern int joyride_smooth;
 void joyride_smooth_wait(void);
@@ -45,6 +62,7 @@ typedef struct {
     int scaling;            /* presenter scaling mode, index into its list */
     int fullscreen;
     int smooth;             /* frames between the game's steps (smooth.c) */
+    int hwrender;           /* the world drawn by the GPU (hwrender.c) */
 } joyride_settings;
 extern joyride_settings joyride_cfg;
 void joyride_config_load(const char *path);   /* then the JOYRIDE_* overrides */
@@ -60,7 +78,8 @@ const char *joyride_screen_scaling_name(int i); /* NULL past the last */
 int  joyride_screen_fullscreen(int set);
 void joyride_screen_refresh(void);             /* show the current frame again */
 uint64_t joyride_screen_frame_ns(void);        /* frame time at the cap, 0 = uncapped */
-int  joyride_screen_gpu_filter(void);          /* the presenter can filter on the GPU */       /* when a paced flip can next show (SDL ns) */
+int  joyride_screen_gpu_filter(void);          /* the presenter can filter on the GPU */
+int  joyride_screen_hwrender(void);            /* ... and draw the world (hardware renderer) */       /* when a paced flip can next show (SDL ns) */
 void joyride_screen_key(int sdl_scancode, int down);   /* as if from the keyboard */
 
 /* 1 while joyride's Flip marks the primary (src/platform/screen_sdl3.c) */

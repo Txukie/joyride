@@ -77,6 +77,7 @@ static inline int32_t lerp(int32_t a, int32_t b, int32_t t) {
 
 uint32_t joyride_smooth_steps(void) { return g_step; }
 
+
 /* The timer callback (0x47DC70, on the timer's thread): when the counter
  * the limiter waits on last moved, so the next step's start is known to
  * the tick rather than guessed from when the loop came round. */
@@ -239,6 +240,7 @@ static uint64_t grid_ceil(uint64_t x, uint64_t period);
  * too soon for a frame of joyride's after it, the game's own draw is made
  * that slot's frame: interpolated for it, and shown then. */
 void joyride_smooth_begin(void) {
+    joyride_hw_begin();                     /* the hardware renderer's draw starts (hwrender.c) */
     g_step++;
     g_real_shown = 0;
     if (!active()) return;
@@ -316,6 +318,7 @@ void joyride_smooth_wait(void) {
             fprintf(stderr, "[smooth]   now +%.1f -> slot +%.1f (t %.2f) due +%.1f\n", (double)(int64_t)(now - start) / 1e6,
                     rel / 1e6, t / 65536.0, (double)(int64_t)(due - start) / 1e6);
         begin(t, 1);
+        joyride_hw_begin();
         hud_save();
         hle_call_guest(0x430D40, 0, NULL);                 /* draw */
         hud_restore();

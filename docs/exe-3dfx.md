@@ -137,8 +137,51 @@ The F12 settings overlay switches it (`JOYRIDE_FILTER=0|1|cpu` for one run).
 `JOYRIDE_HEADLESS_GPU=1` with `JOYRIDE_GPU_DUMP=<dir>` filters without a
 window and saves the result (tests).
 
+## The hardware renderer
+
+The F12 overlay's **Renderer: GPU** (`JOYRIDE_RENDERER=gpu`) goes the rest
+of the way the 3dfx build went: the CPU keeps the geometry, the GPU draws
+the world. `src/hle/hwrender.c` takes over the software rasterizer at the
+three places every 32-bit world draw passes through, and draws nothing:
+
+| Captured at | Draws | From |
+| --- | --- | --- |
+| `0x496CF0`, the polygon fill | lids (`0x497710`), sprites (`0x49787C`, `0x4979C9`) | the record at `[0x78E8C0]` before clipping: type (+2: 2 = colour 0 see-through, else blended), vertex count (+6), texture base (+8), corners (+0x10, shorts), page coordinates (+0x20, bytes) |
+| `0x49A78C` | walls and floors in horizontal spans (`0x497035`: most of the city) | the state block `0x4B8C58`–`0x4B8C88` its entries normalise every orientation into |
+| `0x49ABDC` | walls in vertical spans (`0x497332`) | the same block, transposed |
+
+Calls in play at 1024×768, per frame: about 130–160 horizontal-span quads,
+up to ~50 vertical, ~10 sprites, one blended sprite, rarely a free lid.
+
+Each becomes a quad: four corners, four page coordinates, the texture page
+and shading table slots (shared with the texture filter, including its
+frozen copies of the tile cache), and a mode. `shaders/hwquad.frag` maps
+the texture as the software does, not as two triangles would: each
+scanline (or column, for vertical spans) crosses two of the quad's edges,
+the texture is interpolated along them, then across the span, so there is
+no diagonal seam. Then the texel, bilinear or nearest, through the shading
+table; colour 0 see-through (with filtering, kept where most of the weight
+is not see-through, the 3dfx card's alpha test); blended quads at half
+alpha, because the game's blend table at `[0x78C108]` is an exact average
+(`T[src][dst] = (src + dst) / 2`, checked against a dump of it).
+
+Each draw starts by filling the surface with a key colour (`0xA5FF00FF`, a
+top byte no game colour has). What the CPU still draws (HUD, text, the
+HUD's scaled blits) lands on it; the presenter turns the key into alpha 0
+and `shaders/composite.frag` lays the rest over the GPU's world.
+
+Against the software's own frame (same moment, sharp textures) every
+texture and edge matches; about 10% of pixels differ by a texel boundary
+one pixel over, the software stepping in 16.16 fixed point through a
+reciprocal table where the GPU interpolates floats. With smooth motion and
+filtering: 1024×768 60 fps either way; 2560×1440 60 fps (software 21);
+3440×1440 55 fps with the game at full speed (software 18, the game slowed
+to 20.8 steps a second).
+
 Not done yet:
 
+* Drawing the world above the game's resolution (the quads are in game
+  pixels; the target can be any multiple).
 * 16-bit colour modes (the A16 loops; the D loops only exist in 32-bit
   form, and how walls draw in 16-bit modes is not traced yet).
 * The scaled blits (C loops) and translucent polygons (B loops).

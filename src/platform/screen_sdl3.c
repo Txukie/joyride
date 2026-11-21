@@ -158,8 +158,11 @@ static int convert(const uint8_t *px, int w, int h, int pitch, int bpp, const ui
         const uint8_t *row = px + (size_t)y * (size_t)pitch;
         uint32_t *o = g_bgra + (size_t)y * (size_t)w;
         switch (bpp) {
-        case 32:
-            for (int x = 0; x < w; x++) o[x] = ((const uint32_t *)row)[x] | 0xFF000000u;
+        case 32:                                 /* the hardware renderer's key: see-through */
+            for (int x = 0; x < w; x++) {
+                uint32_t c = ((const uint32_t *)row)[x];
+                o[x] = c == JOYRIDE_KEY ? 0 : c | 0xFF000000u;
+            }
             break;
         case 24:
             for (int x = 0; x < w; x++)
@@ -288,9 +291,18 @@ static const uint32_t k_vs[] =
 static const uint32_t k_fs[] =
 #include "texfilter.frag.h"
 ;
+static const uint32_t k_hw_vs[] =
+#include "hwquad.vert.h"
+;
+static const uint32_t k_hw_fs[] =
+#include "hwquad.frag.h"
+;
+static const uint32_t k_comp_fs[] =
+#include "composite.frag.h"
+;
 #endif
 
-static SDL_GPUGraphicsPipeline *g_fpipe;
+static SDL_GPUGraphicsPipeline *g_fpipe, *g_hwpipe, *g_comppipe;
 static SDL_GPUSampler *g_near;
 static SDL_GPUTexture *g_gtex, *g_pages, *g_pals, *g_filt;
 static int g_gtw, g_gth, g_fw, g_fh;
@@ -320,8 +332,47 @@ static int filter_init(void) {
         };
         g_fpipe = SDL_CreateGPUGraphicsPipeline(g_gpu, &pi);
     }
-    if (vs) SDL_ReleaseGPUShader(g_gpu, vs);
     if (fs) SDL_ReleaseGPUShader(g_gpu, fs);
+    /* the hardware renderer: quads (blended over what is below), then the
+     * CPU's pixels over them */
+    SDL_GPUShaderCreateInfo hv = { .code_size = sizeof k_hw_vs, .code = (const Uint8 *)k_hw_vs, .entrypoint = "main",
+                                   .format = SDL_GPU_SHADERFORMAT_SPIRV, .stage = SDL_GPU_SHADERSTAGE_VERTEX,
+                                   .num_storage_buffers = 1, .num_uniform_buffers = 1 };
+    SDL_GPUShaderCreateInfo hf = { .code_size = sizeof k_hw_fs, .code = (const Uint8 *)k_hw_fs, .entrypoint = "main",
+                                   .format = SDL_GPU_SHADERFORMAT_SPIRV, .stage = SDL_GPU_SHADERSTAGE_FRAGMENT,
+                                   .num_samplers = 2, .num_storage_buffers = 1, .num_uniform_buffers = 1 };
+    SDL_GPUShaderCreateInfo cf = { .code_size = sizeof k_comp_fs, .code = (const Uint8 *)k_comp_fs, .entrypoint = "main",
+                                   .format = SDL_GPU_SHADERFORMAT_SPIRV, .stage = SDL_GPU_SHADERSTAGE_FRAGMENT,
+                                   .num_samplers = 1, .num_uniform_buffers = 1 };
+    SDL_GPUShader *hvs = SDL_CreateGPUShader(g_gpu, &hv), *hfs = SDL_CreateGPUShader(g_gpu, &hf), *cfs = SDL_CreateGPUShader(g_gpu, &cf);
+    if (hvs && hfs && cfs && vs) {
+        SDL_GPUColorTargetDescription blend = {
+            .format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
+            .blend_state = { .enable_blend = true,
+                             .src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA,
+                             .dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+                             .color_blend_op = SDL_GPU_BLENDOP_ADD,
+                             .src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE,
+                             .dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO,
+                             .alpha_blend_op = SDL_GPU_BLENDOP_ADD },
+        };
+        SDL_GPUGraphicsPipelineCreateInfo pq = {
+            .vertex_shader = hvs, .fragment_shader = hfs, .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
+            .target_info = { .color_target_descriptions = &blend, .num_color_targets = 1 },
+        };
+        g_hwpipe = SDL_CreateGPUGraphicsPipeline(g_gpu, &pq);
+        SDL_GPUColorTargetDescription plain = { .format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM };
+        SDL_GPUGraphicsPipelineCreateInfo pc = {
+            .vertex_shader = vs, .fragment_shader = cfs, .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
+            .target_info = { .color_target_descriptions = &plain, .num_color_targets = 1 },
+        };
+        g_comppipe = SDL_CreateGPUGraphicsPipeline(g_gpu, &pc);
+    }
+    if (vs) SDL_ReleaseGPUShader(g_gpu, vs);
+    if (hvs) SDL_ReleaseGPUShader(g_gpu, hvs);
+    if (hfs) SDL_ReleaseGPUShader(g_gpu, hfs);
+    if (cfs) SDL_ReleaseGPUShader(g_gpu, cfs);
+    if (!g_hwpipe || !g_comppipe) fprintf(stderr, "[screen] hardware renderer unavailable: %s\n", SDL_GetError());
     SDL_GPUSamplerCreateInfo si = { .min_filter = SDL_GPU_FILTER_NEAREST, .mag_filter = SDL_GPU_FILTER_NEAREST,
                                     .mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST,
                                     .address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
@@ -421,6 +472,103 @@ static int filter_pass(SDL_GPUCommandBuffer *cmd, const uint32_t *gb, int gw, in
     return 1;
 }
 
+/* ---- the hardware renderer ------------------------------------------------ */
+
+static SDL_GPUTexture *g_world;                  /* the frame, drawn by the GPU */
+static int g_ww, g_wh;
+static SDL_GPUBuffer *g_qbuf;
+static Uint32 g_qcap;
+static SDL_GPUTransferBuffer *g_qup;
+static Uint32 g_qup_cap;
+
+int joyride_screen_hwrender(void) { return filter_init() && g_hwpipe && g_comppipe; }
+
+/* Draw the frame's quads (hwrender.c) and the CPU's pixels of g_tex over
+ * them into g_world; *ow, *oh: its size. */
+static int hw_pass(SDL_GPUCommandBuffer *cmd, const joyride_quad *quads, int n, int w, int h, int *ow, int *oh) {
+    if (!joyride_screen_hwrender()) return 0;
+    int scale = 1;
+    int tw = w * scale, th = h * scale;
+    if (!g_world || g_ww != tw || g_wh != th) {
+        if (g_world) SDL_ReleaseGPUTexture(g_gpu, g_world);
+        g_world = make_tex(tw, th, SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET);
+        g_ww = tw, g_wh = th;
+        if (!g_world) return 0;
+    }
+    /* pages and palettes that changed, as for the filter */
+    static changes_t ch;
+    static uint32_t pals[4096 * 256];
+    ch.npages = ch.npals = 0, ch.pals = pals;
+    joyride_gbuf_changes(on_page, on_pal, &ch);
+    Uint32 qsize = (Uint32)(n > 0 ? n : 1) * (Uint32)sizeof(joyride_quad);
+    if (qsize > g_qcap) {
+        if (g_qbuf) SDL_ReleaseGPUBuffer(g_gpu, g_qbuf);
+        SDL_GPUBufferCreateInfo bi = { .usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, .size = qsize * 2 };
+        g_qbuf = SDL_CreateGPUBuffer(g_gpu, &bi);
+        g_qcap = g_qbuf ? bi.size : 0;
+        if (!g_qbuf) return 0;
+    }
+    Uint32 need = qsize + (Uint32)ch.npages * 65536u + (Uint32)ch.npals * 1024u;
+    if (need > g_qup_cap) {
+        if (g_qup) SDL_ReleaseGPUTransferBuffer(g_gpu, g_qup);
+        SDL_GPUTransferBufferCreateInfo bi = { .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, .size = need + need / 4 };
+        g_qup = SDL_CreateGPUTransferBuffer(g_gpu, &bi);
+        g_qup_cap = g_qup ? bi.size : 0;
+        if (!g_qup) return 0;
+    }
+    uint8_t *map = SDL_MapGPUTransferBuffer(g_gpu, g_qup, true);
+    if (!map) return 0;
+    if (n > 0) memcpy(map, quads, (size_t)n * sizeof(joyride_quad));
+    Uint32 off = qsize;
+    for (int i = 0; i < ch.npages; i++, off += 65536u) memcpy(map + off, ch.page[i], 65536);
+    memcpy(map + off, pals, (size_t)ch.npals * 1024);
+    SDL_UnmapGPUTransferBuffer(g_gpu, g_qup);
+
+    SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cmd);
+    if (n > 0) {
+        SDL_GPUTransferBufferLocation src = { .transfer_buffer = g_qup, .offset = 0 };
+        SDL_GPUBufferRegion dst = { .buffer = g_qbuf, .offset = 0, .size = (Uint32)n * (Uint32)sizeof(joyride_quad) };
+        SDL_UploadToGPUBuffer(cp, &src, &dst, false);
+    }
+    off = qsize;
+    for (int i = 0; i < ch.npages; i++, off += 65536u) {
+        SDL_GPUTextureTransferInfo s2 = { .transfer_buffer = g_qup, .offset = off, .pixels_per_row = 256, .rows_per_layer = 256 };
+        SDL_GPUTextureRegion d2 = { .texture = g_pages, .layer = (Uint32)ch.page_slot[i], .w = 256, .h = 256, .d = 1 };
+        SDL_UploadToGPUTexture(cp, &s2, &d2, false);
+    }
+    for (int i = 0; i < ch.npals; i++, off += 1024u) {
+        SDL_GPUTextureTransferInfo s2 = { .transfer_buffer = g_qup, .offset = off, .pixels_per_row = 256, .rows_per_layer = 1 };
+        SDL_GPUTextureRegion d2 = { .texture = g_pals, .y = (Uint32)ch.pal_slot[i], .w = 256, .h = 1, .d = 1 };
+        SDL_UploadToGPUTexture(cp, &s2, &d2, false);
+    }
+    SDL_EndGPUCopyPass(cp);
+
+    SDL_GPUColorTargetInfo ct = { .texture = g_world, .load_op = SDL_GPU_LOADOP_CLEAR,
+                                  .clear_color = { 0, 0, 0, 1 }, .store_op = SDL_GPU_STOREOP_STORE };
+    SDL_GPURenderPass *rp = SDL_BeginGPURenderPass(cmd, &ct, 1, NULL);
+    if (!rp) return 0;
+    float view[4] = { (float)w, (float)h, 0, 0 };
+    float prm[4] = { (float)scale, joyride_texfilter ? 1.0f : 0.0f, 0, 0 };
+    if (n > 0) {
+        SDL_BindGPUGraphicsPipeline(rp, g_hwpipe);
+        SDL_BindGPUVertexStorageBuffers(rp, 0, &g_qbuf, 1);
+        SDL_GPUTextureSamplerBinding b[2] = { { g_pages, g_near }, { g_pals, g_near } };
+        SDL_BindGPUFragmentSamplers(rp, 0, b, 2);
+        SDL_BindGPUFragmentStorageBuffers(rp, 0, &g_qbuf, 1);
+        SDL_PushGPUVertexUniformData(cmd, 0, view, sizeof view);
+        SDL_PushGPUFragmentUniformData(cmd, 0, prm, sizeof prm);
+        SDL_DrawGPUPrimitives(rp, 6, (Uint32)n, 0, 0);
+    }
+    SDL_BindGPUGraphicsPipeline(rp, g_comppipe);
+    SDL_GPUTextureSamplerBinding fb = { g_tex, g_near };
+    SDL_BindGPUFragmentSamplers(rp, 0, &fb, 1);
+    SDL_PushGPUFragmentUniformData(cmd, 0, prm, sizeof prm);
+    SDL_DrawGPUPrimitives(rp, 3, 1, 0, 0);
+    SDL_EndGPURenderPass(rp);
+    *ow = tw, *oh = th;
+    return 1;
+}
+
 /* JOYRIDE_HEADLESS_GPU=1 with JOYRIDE_GPU_DUMP=<dir>: no window, but the GPU
  * filters, and the result is read back and saved, once a second (tests). */
 static void headless_dump(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *src, int w, int h) {
@@ -494,14 +642,20 @@ static void present(int flip) {
     SDL_EndGPUCopyPass(cp);
 
     SDL_GPUTexture *pic = g_tex;                         /* what goes to the window */
-    if (bpp == 32) joyride_gbuf_size(pitch / 4, h);      /* texfilter.c records into this */
-    if (joyride_texfilter == 2 && filter_init()) {
+    int pw = w, ph = h;                                  /* its size */
+    if (bpp == 32) joyride_gbuf_size(pitch / 4, h);      /* texfilter.c and hwrender.c use this */
+    const joyride_quad *quads;
+    int nq = joyride_hw_quads(&quads);
+    if (nq >= 0) {                                       /* the world was drawn by the GPU */
+        if (hw_pass(cmd, quads, nq, w, h, &pw, &ph)) pic = g_world;
+        joyride_hw_done();
+    } else if (joyride_texfilter == 2 && filter_init()) {
         const uint32_t *gb;
         int gw, gh;
         if (joyride_gbuf_frame(&gb, &gw, &gh) && gw >= w && gh >= h && filter_pass(cmd, gb, gw, gh, w, h)) pic = g_filt;
     }
     joyride_gbuf_done();
-    if (!g_win) { headless_dump(cmd, pic, w, h); return; }
+    if (!g_win) { headless_dump(cmd, pic, pw, ph); return; }
 
     SDL_GPUTexture *swap = NULL;
     Uint32 sw = 0, sh = 0;
@@ -510,23 +664,23 @@ static void present(int flip) {
     hle_block_end();
     if (!ok || !swap || !sw || !sh) { SDL_SubmitGPUCommandBuffer(cmd); return; }
 
-    place(w, h, (int)sw, (int)sh);
-    if (g_mode == MODE_SHARP && (g_dst.w > w || g_dst.h > h)) {
-        int k = (int)ceil(fmax(g_dst.w / w, g_dst.h / h));
-        if (!g_pre || g_pw != w * k || g_ph != h * k) {
+    place(w, h, (int)sw, (int)sh);                       /* the game's size sets the shape */
+    if (g_mode == MODE_SHARP && (g_dst.w > pw || g_dst.h > ph)) {
+        int k = (int)ceil(fmax(g_dst.w / pw, g_dst.h / ph));
+        if (!g_pre || g_pw != pw * k || g_ph != ph * k) {
             if (g_pre) SDL_ReleaseGPUTexture(g_gpu, g_pre);
-            g_pre = make_tex(w * k, h * k, SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET);
-            g_pw = w * k, g_ph = h * k;
+            g_pre = make_tex(pw * k, ph * k, SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET);
+            g_pw = pw * k, g_ph = ph * k;
         }
         if (g_pre) {
-            blit(cmd, pic, w, h, g_pre, (SDL_FRect){ 0, 0, (float)g_pw, (float)g_ph }, SDL_GPU_FILTER_NEAREST, 0);
+            blit(cmd, pic, pw, ph, g_pre, (SDL_FRect){ 0, 0, (float)g_pw, (float)g_ph }, SDL_GPU_FILTER_NEAREST, 0);
             blit(cmd, g_pre, g_pw, g_ph, swap, g_dst, SDL_GPU_FILTER_LINEAR, 1);
         } else {
-            blit(cmd, pic, w, h, swap, g_dst, SDL_GPU_FILTER_LINEAR, 1);
+            blit(cmd, pic, pw, ph, swap, g_dst, SDL_GPU_FILTER_LINEAR, 1);
         }
     } else {
         SDL_GPUFilter f = g_mode == MODE_SMOOTH || g_mode == MODE_SHARP ? SDL_GPU_FILTER_LINEAR : SDL_GPU_FILTER_NEAREST;
-        blit(cmd, pic, w, h, swap, g_dst, f, 1);
+        blit(cmd, pic, pw, ph, swap, g_dst, f, 1);
     }
     SDL_SubmitGPUCommandBuffer(cmd);
 }
