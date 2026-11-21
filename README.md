@@ -43,8 +43,9 @@ size, F12 or Esc closes. They are kept in `~/.local/share/joyride/joyride.cfg`.
   up to the display's refresh rate, with the game's speed unchanged (it
   still steps 23.3 times a second; the picture runs one step, 43 ms,
   behind). Or original: 23.3 frames a second. See
-  [`src/hle/smooth.c`](src/hle/smooth.c). At 1024×768 it reaches about 58
-  fps with sharp textures and 47 filtered. Turning the game's limiter
+  [`src/hle/smooth.c`](src/hle/smooth.c). At 1024×768 it reaches the
+  display's rate (60 fps at 60 Hz), filtered or not; larger sizes get fewer
+  as the software renderer takes longer (about 30–36 at 1920×1080). Turning the game's limiter
   off (F8) still just runs the game faster.
 * **Scaling** of the picture to the window: sharp (default), smooth,
   nearest, integer.

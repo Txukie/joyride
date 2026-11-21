@@ -252,6 +252,17 @@ static int cap_fps(void) {
 }
 
 static void pace(void) {
+    uint64_t deadline = 0, target = joyride_smooth_target(&deadline);
+    if (target) {                                    /* smooth.c's frame: its grid slot, if there is time */
+        uint64_t until = target < deadline ? target : deadline, now = SDL_GetTicksNS();
+        if (now < until && until - now < 1000000000ull) {
+            hle_block_begin();
+            SDL_DelayPrecise(until - now);
+            hle_block_end();
+        }
+        g_last_flip_ns = target;
+        return;
+    }
     int fps = cap_fps();
     uint64_t now = SDL_GetTicksNS();
     if (fps > 0 && g_last_flip_ns) {
@@ -443,11 +454,10 @@ static void headless_dump(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *src, int w,
     SDL_ReleaseGPUTransferBuffer(g_gpu, down);
 }
 
-/* the earliest a paced flip will reach the screen (smooth.c plans by it) */
-uint64_t joyride_screen_next_slot(void) {
+/* the time between two frames at the cap (0 = uncapped); smooth.c's grid */
+uint64_t joyride_screen_frame_ns(void) {
     int fps = cap_fps();
-    if (fps <= 0 || !g_last_flip_ns) return 0;
-    return g_last_flip_ns + 1000000000ull / (uint64_t)fps;
+    return fps > 0 ? 1000000000ull / (uint64_t)fps : 0;
 }
 
 static void present(int flip) {

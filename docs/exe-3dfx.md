@@ -125,8 +125,9 @@ the loop writes the blend. Same picture; the CPU path costs about twice the
 draw time.
 
 Measured with smooth motion (`src/hle/smooth.c`), the game holding 23.3
-steps a second: a filtered draw at 1024×768 takes 6.4 ms with the GPU path
-(41 fps with the CPU filter, 58 sharp); at 2560×1440 the game's own step
+steps a second: a filtered draw at 1024×768 takes 6.4 ms with the GPU path,
+so it runs at the display's full rate (60 fps at 60 Hz; 41 with the CPU
+filter); at 2560×1440 the game's own step
 takes 28.6 ms of its 42.9 with the GPU path, so the game keeps its speed
 (the CPU filter slows it to 20 steps a second). What limits it now is the
 software rasterizer itself; drawing the game's quads on the GPU outright

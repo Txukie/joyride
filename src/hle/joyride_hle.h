@@ -36,6 +36,7 @@ extern int joyride_smooth;
 void joyride_smooth_wait(void);
 int  joyride_smooth_skip(void);               /* the presenter: leave this flip out */
 int  joyride_smooth_running(void);            /* drawing between steps now */
+uint64_t joyride_smooth_target(uint64_t *deadline);   /* the presenter: this flip's slot, or 0 */
 
 /* the in-game settings overlay (src/platform/overlay.c) */
 typedef struct {
@@ -58,7 +59,7 @@ int  joyride_screen_scaling(int set);          /* set < 0: just read */
 const char *joyride_screen_scaling_name(int i); /* NULL past the last */
 int  joyride_screen_fullscreen(int set);
 void joyride_screen_refresh(void);             /* show the current frame again */
-uint64_t joyride_screen_next_slot(void);
+uint64_t joyride_screen_frame_ns(void);        /* frame time at the cap, 0 = uncapped */
 int  joyride_screen_gpu_filter(void);          /* the presenter can filter on the GPU */       /* when a paced flip can next show (SDL ns) */
 void joyride_screen_key(int sdl_scancode, int down);   /* as if from the keyboard */
 
