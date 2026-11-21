@@ -37,20 +37,21 @@ size, F12 or Esc closes. They are kept in `~/.local/share/joyride/joyride.cfg`.
   the city to the sides at the game's usual zoom, instead of the game's own
   behaviour of zooming in. Menus stay 640×480.
 * **Textures** — bilinear filtering, the 3dfx version's look (default), or
-  sharp; see [`docs/exe-3dfx.md`](docs/exe-3dfx.md). 32-bit colour only.
+  sharp. Filtered on the GPU like the 3dfx card did (Vulkan; on the CPU
+  elsewhere); see [`docs/exe-3dfx.md`](docs/exe-3dfx.md). 32-bit colour only.
 * **Motion** — smooth (default): frames drawn between the game's own steps,
   up to the display's refresh rate, with the game's speed unchanged (it
   still steps 23.3 times a second; the picture runs one step, 43 ms,
   behind). Or original: 23.3 frames a second. See
   [`src/hle/smooth.c`](src/hle/smooth.c). At 1024×768 it reaches about 58
-  fps with sharp textures and 40–47 filtered. Turning the game's limiter
+  fps with sharp textures and 47 filtered. Turning the game's limiter
   off (F8) still just runs the game faster.
 * **Scaling** of the picture to the window: sharp (default), smooth,
   nearest, integer.
 * **Fullscreen** (also F11 or Alt+Enter).
 
-The renderer is software, as in the original: up to 2560×1440 runs at full
-speed with filtering; 3440×1440 needs sharp textures to keep it.
+The renderer is software, as in the original: up to 2560×1440 keeps the
+game's full speed with filtering; larger sizes may need sharp textures.
 `JOYRIDE_RES=<w>x<h>|desktop|game`, `JOYRIDE_FILTER=0|1`, `JOYRIDE_SMOOTH=0|1`
 and `JOYRIDE_SCALE=<mode>` override the file for one run.
 
@@ -99,7 +100,8 @@ joyride plays with joyride, not with the original Windows game.
 git clone --recursive https://github.com/Txukie/joyride && cd joyride
 python3 -m venv .venv && .venv/bin/pip install -r tools/requirements.txt
 # needs: CMake, Ninja, a C compiler, SDL3 and SDL3_ttf (development files);
-# optional: ffmpeg's libavformat/libavcodec for the intro movie
+# optional: ffmpeg's libavformat/libavcodec for the intro movie, glslc
+# (shaderc) for texture filtering on the GPU
 mkdir -p game_data && cp -r "<your install>/WINO" game_data/
 tools/lift.sh        # writes the generated C to gen/ (never committed)
 cmake -S . -B build -G Ninja && cmake --build build

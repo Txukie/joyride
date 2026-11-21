@@ -256,7 +256,7 @@ int main(int argc, char **argv) {
     char cfgfile[PATH_MAX + 32];
     snprintf(cfgfile, sizeof cfgfile, "%s/../joyride.cfg", overlay);
     joyride_config_load(cfgfile);
-    joyride_texfilter = (uint32_t)joyride_cfg.filter;
+    joyride_texfilter_set(joyride_cfg.filter);
     joyride_smooth = joyride_cfg.smooth;
     joyride_screen_scaling(joyride_cfg.scaling);
     if (joyride_cfg.fullscreen && !headless) joyride_screen_fullscreen(1);

@@ -68,6 +68,29 @@ target_compile_definitions(win32hle PUBLIC ${JOYRIDE_DEFS})
 target_compile_options(win32hle PRIVATE -w)
 target_link_libraries(win32hle PUBLIC SDL3::SDL3 SDL3_ttf::SDL3_ttf Threads::Threads m)
 
+# --- shaders: GLSL -> SPIR-V at build time (glslc, from shaderc), embedded
+# as C arrays. Without glslc the texture filter runs on the CPU only.
+find_program(GLSLC glslc)
+if(GLSLC)
+    set(JOYRIDE_SHADER_DIR "${CMAKE_BINARY_DIR}/shaders")
+    set(JOYRIDE_SHADER_HEADERS)
+    foreach(shader fullscreen.vert texfilter.frag)
+        set(out "${JOYRIDE_SHADER_DIR}/${shader}.h")
+        add_custom_command(OUTPUT "${out}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${JOYRIDE_SHADER_DIR}"
+            COMMAND ${GLSLC} -O -mfmt=c -o "${out}" "${CMAKE_SOURCE_DIR}/shaders/${shader}"
+            DEPENDS "${CMAKE_SOURCE_DIR}/shaders/${shader}"
+            COMMENT "glslc ${shader}")
+        list(APPEND JOYRIDE_SHADER_HEADERS "${out}")
+    endforeach()
+    add_custom_target(joyride_shaders DEPENDS ${JOYRIDE_SHADER_HEADERS})
+    add_dependencies(win32hle joyride_shaders)
+    target_include_directories(win32hle PRIVATE "${JOYRIDE_SHADER_DIR}")
+    target_compile_definitions(win32hle PRIVATE JOYRIDE_GPU_FILTER)
+else()
+    message(STATUS "glslc not found: texture filtering on the CPU only")
+endif()
+
 # --- joyride itself ---------------------------------------------------------
 add_executable(joyride
     src/host/main.c

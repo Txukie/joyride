@@ -33,14 +33,16 @@ import sys
 #   D: wall spans (horizontal, then vertical), u steps by ecx's top half,
 #      v is fixed per span at [0x4B8C0C] (16.16); where the add comes
 #      before the fetch the fraction is the one before it, ecx - eax.
+#   The pixel about to be written is [edi], or [edi - 4] where the loop
+#   has already stepped edi (0x49AA88).
 TEXHOOKS = [
-    # fetch,     colour,      reg,   u fraction,          v fraction,          transparent
-    (0x00499211, 0x00499217, "edx", "eax >> 16",         "ebp >> 16",         0),
-    (0x00499813, 0x0049981E, "edx", "eax >> 16",         "ebp >> 16",         1),
-    (0x0049AA88, 0x0049AA8C, "esi", "ecx >> 16",         "MEM32(0x4B8C0C)",   0),
-    (0x0049AB8A, 0x0049AB92, "esi", "(ecx - eax) >> 16", "MEM32(0x4B8C0C)",   1),
-    (0x0049AEDE, 0x0049AEE2, "esi", "ecx >> 16",         "MEM32(0x4B8C0C)",   0),
-    (0x0049AFEE, 0x0049AFF6, "esi", "(ecx - eax) >> 16", "MEM32(0x4B8C0C)",   1),
+    # fetch,     colour,      reg,   pixel,     u fraction,          v fraction,        transparent
+    (0x00499211, 0x00499217, "edx", "edi",     "eax >> 16",         "ebp >> 16",       0),
+    (0x00499813, 0x0049981E, "edx", "edi",     "eax >> 16",         "ebp >> 16",       1),
+    (0x0049AA88, 0x0049AA8C, "esi", "edi - 4", "ecx >> 16",         "MEM32(0x4B8C0C)", 0),
+    (0x0049AB8A, 0x0049AB92, "esi", "edi",     "(ecx - eax) >> 16", "MEM32(0x4B8C0C)", 1),
+    (0x0049AEDE, 0x0049AEE2, "esi", "edi",     "ecx >> 16",         "MEM32(0x4B8C0C)", 0),
+    (0x0049AFEE, 0x0049AFF6, "esi", "edi",     "(ecx - eax) >> 16", "MEM32(0x4B8C0C)", 1),
 ]
 TEXMARK = "joyride_tex"
 
@@ -53,12 +55,12 @@ TEXENTRY = {0x00497035: 1, 0x00497332: 1, 0x00497710: 1, 0x0049787C: 0, 0x004979
 
 def texhook_lines():
     after = {}
-    for fetch, col, reg, fu, fv, tr in TEXHOOKS:
-        after[fetch] = (f"{{ extern uint32_t joyride_texfilter, joyride_texc; "
-                        f"extern uint32_t joyride_bilerp32(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t); "
-                        f"if (joyride_texfilter) joyride_texc = joyride_bilerp32(ebx, {fu}, {fv}, edx, {tr}); }}")
+    for fetch, col, reg, dst, fu, fv, tr in TEXHOOKS:
+        after[fetch] = (f"{{ extern uint32_t joyride_texfilter; "
+                        f"extern void joyride_tex_fetch(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t); "
+                        f"if (joyride_texfilter) joyride_tex_fetch({dst}, ebx, {fu}, {fv}, edx, {tr}); }}")
         after[col] = (f"{{ extern uint32_t joyride_texfilter, joyride_texc; "
-                      f"if (joyride_texfilter) {reg} = joyride_texc; }}")
+                      f"if (joyride_texfilter == 1) {reg} = joyride_texc; }}")
     for a, tile in TEXENTRY.items():
         after[a] = f"{{ extern void joyride_tex_begin(uint32_t); joyride_tex_begin({tile}); }}"
     return after
@@ -93,6 +95,9 @@ TEXAFTER[0x00414999] = "{ extern void joyride_smooth_begin(void); joyride_smooth
 TEXAFTER[0x0041499E] = "{ extern void joyride_smooth_end(void); joyride_smooth_end(); }"
 TEXAFTER[0x0047C050] = ("{ extern void joyride_smooth_sprite_in(uint32_t); "
                         "joyride_smooth_sprite_in(MEM32(esp + 0x14)); }")
+# The tile converter (0x49B044), before it writes the cache slot at
+# [0x4B8C5C] (src/hle/texfilter.c: the GPU path keeps the old texels).
+TEXAFTER[0x0049B044] = "{ extern void joyride_tex_overwrite(uint32_t); joyride_tex_overwrite(MEM32(0x4B8C5C)); }"
 TEXAFTER[0x0047DC70] = "{ extern void joyride_smooth_tick(void); joyride_smooth_tick(); }"
 TEXAFTER[0x0047C125] = "{ extern void joyride_smooth_sprite_out(void); joyride_smooth_sprite_out(); }"
 # MGL's mode size lookup (0x48B770), right after it stores the height
@@ -104,9 +109,13 @@ ADDR = re.compile(r"/\* 0x([0-9A-F]{8}): ")
 GOTO = re.compile(r"goto L_([0-9A-F]{8});.*/\* 0x([0-9A-F]{8}): (j\w*|loop\w*) ")
 
 
+SPLICE = re.compile(r"^\s*\{ extern .*joyride_")
+
+
 def process(path: str) -> int:
     with open(path) as f:
-        lines = f.readlines()
+        original = f.readlines()
+    lines = [l for l in original if not SPLICE.match(l)]            # joyride's splices are redone
     out, added = [], 0
     hooked = 0
     for i, line in enumerate(lines):
@@ -120,15 +129,14 @@ def process(path: str) -> int:
         out.append(line)
         a = ADDR.search(line)
         if a and int(a.group(1), 16) in TEXAFTER and line.lstrip().startswith(("SET_HI8", "SET_LO8(eax, MEM8(0x503224))", "SET_LO8(eax, MEM8(0x502F34))", "RECOMP_CALL(sub_00430B20)", "RECOMP_CALL(sub_00430D40)",
-        "esp = esp - 0x10u", "esp = esp + 0x10u", "eax = MEM32(0x775580)", "esp = esp + 0x10u", "MEM32(ecx) = ebx", "MEM32(ecx + 0x24) = edx", "MEM8(ecx + 0x74F18C)", "edx =", "esi =", "PUSH32(esp, ebp)")):
-            nxt = lines[i + 1] if i + 1 < len(lines) else ""
-            if "joyride_" not in nxt:
+        "esp = esp - 0x10u", "esp = esp + 0x10u", "eax = MEM32(0x775580)", "edi = MEM32(0x4B8C58)", "esp = esp + 0x10u", "MEM32(ecx) = ebx", "MEM32(ecx + 0x24) = edx", "MEM8(ecx + 0x74F18C)", "edx =", "esi =", "PUSH32(esp, ebp)")):
+            if True:
                 indent = line[:len(line) - len(line.lstrip())]
                 out.append(f"{indent}{TEXAFTER[int(a.group(1), 16)]}\n")
                 hooked += 1
     process.hooked = getattr(process, "hooked", 0) + hooked
     added += hooked
-    if added:
+    if out != original:
         tmp = path + ".tmp"
         with open(tmp, "w") as f:
             f.writelines(out)
@@ -143,8 +151,7 @@ def main() -> int:
         if name.startswith("recomp_0") and name.endswith(".c"):
             total += process(os.path.join(d, name))
     hooked = getattr(process, "hooked", 0)
-    print(f"postlift: {total - hooked} loop back-edges given a RECOMP_BACKEDGE(), "
-          f"{hooked} texture filter splices (of {2 * len(TEXHOOKS) + len(TEXENTRY)} sites) and the mode picker")
+    print(f"postlift: {total - hooked} loop back-edges given a RECOMP_BACKEDGE(), {hooked} joyride splices")
     return 0
 
 

@@ -88,35 +88,54 @@ The texel loops (all `mov dh, byte ptr [ebx]`, `ebx` = page | v << 8 | u):
 
 ## What joyride does with it
 
-**Bilinear filtering, in the software renderer.** `tools/postlift.py`
-splices two statements into each 32-bit A and D loop: at the texel fetch,
-`joyride_bilerp32` (`src/hle/texfilter.c`) blends the four texels around
-the exact sub-texel position, each through the face's own shading table; at
-the colour load the loop's register takes the blend. The polygon entry
-points record whether the texture is a 64×64 world tile (neighbours clamp to
-the tile, so faces never bleed into the next texture) or a sprite (clamp to
-the page). In transparent loops, colour-0 neighbours get no weight: cut-out
-edges keep the original shape, with no dark fringe.
+**Bilinear filtering on the GPU, as the 3dfx card did it.** The CPU keeps
+doing what it did for the Voodoo too, all the geometry, and draws its spans
+as always. `tools/postlift.py` splices a call into each 32-bit A and D loop's
+texel fetch: `joyride_tex_fetch` (`src/hle/texfilter.c`) records, for the
+pixel about to be written, where the texel came from:
 
-Everything else stays the game's: geometry, draw order, clipping, the HUD.
-That is close to what the 3dfx build did (CPU geometry, filtered texturing).
-The differences: filtering happens at the game's own resolution (the
-Windows exe offers up to 1024×768 itself), and cut-outs follow the original
-texels instead of a filtered alpha threshold.
+| | bits |
+| --- | --- |
+| u, v in the 256×256 page, to 1/64 texel | 14 + 14 |
+| texture page slot (0 = not recorded) | 7 |
+| shading table slot | 10 |
+| transparent (colour 0 skipped), tile clamp | 1 + 1 |
+| check: 17 bits of the colour written | 4 + 13 |
 
-The F12 settings overlay switches it (`JOYRIDE_FILTER=0|1` for one run). The blend is two
-packed 32-bit lerps per row and one between rows, with the four texels'
-colours cached while consecutive pixels share them. Up to 2560×1440
-(`JOYRIDE_RES`, see `src/hle/display.c`) the game keeps its 23.3 fps (a
-70 Hz Miles timer, 3 ticks a frame); at 3440×1440 filtering costs about a
-quarter of that, and since the game's speed is tied to its frame rate,
-sharp textures are the way to play there.
+The presenter (`src/platform/screen_sdl3.c`) uploads that record, the pages
+and shading tables that changed (each compared by hash; a table is 256
+colours 256 bytes apart in the game's memory), and runs
+`shaders/texfilter.frag` over the frame: each recorded pixel is re-sampled
+from the four texels around its point, through its table. World textures
+clamp to their 64×64 tile, sprites to their page; in transparent loops
+colour 0 gets no weight, so cut-outs keep their shape. A pixel whose colour
+no longer matches its check was drawn over afterwards (HUD, text, effects)
+or is left from an earlier frame, and stays as the game drew it, so the
+record is never cleared.
+
+The game rewrites part of its memory mid-frame: a cache of converted
+(rotated) tiles whose slots it reuses (`0x49B044`). A splice there copies the
+page aside for the pixels already recorded from it before it changes.
+
+Shaders are GLSL, compiled to SPIR-V by the build (`glslc`), so the GPU path
+runs where SDL_GPU takes SPIR-V (Vulkan). Elsewhere, or without `glslc`,
+`joyride_bilerp32` filters on the CPU instead: it blends at the fetch and
+the loop writes the blend. Same picture; the CPU path costs about twice the
+draw time.
+
+Measured with smooth motion (`src/hle/smooth.c`), the game holding 23.3
+steps a second: at 1024×768, 47 fps filtered on the GPU (37 on the CPU, 58
+sharp); at 2560×1440, 23 fps on the GPU without slowing the game (the CPU
+filter slowed it to 19). What limits it now is the software rasterizer and
+the per-pixel recording; recording per span, or drawing the game's quads on
+the GPU outright, are the next steps.
+
+The F12 settings overlay switches it (`JOYRIDE_FILTER=0|1|cpu` for one run).
+`JOYRIDE_HEADLESS_GPU=1` with `JOYRIDE_GPU_DUMP=<dir>` filters without a
+window and saves the result (tests).
 
 Not done yet:
 
 * 16-bit colour modes (the A16 loops; the D loops only exist in 32-bit
-  form, and how walls draw in 16-bit modes is not traced yet). 8-bit modes cannot be
-  filtered: a blend has no palette entry.
+  form, and how walls draw in 16-bit modes is not traced yet).
 * The scaled blits (C loops) and translucent polygons (B loops).
-* Rendering the world on the GPU from the quads themselves, which would
-  allow resolutions above the game's own.

@@ -12,7 +12,15 @@ extern const win32hle_shim joyride_dplay[];   /* dplayx.dll (DirectPlay) */
 void joyride_dplay_shutdown(void);           /* close any network session (dplay.c) */
 
 /* bilinear texture filtering (texfilter.c): on/off, and the env setup */
-extern uint32_t joyride_texfilter;
+extern uint32_t joyride_texfilter;            /* 0 off, 1 CPU, 2 GPU */
+void joyride_texfilter_set(int on);
+/* the GPU path's recording (texfilter.c), for the presenter */
+void joyride_gbuf_size(int pitch_px, int rows);
+int  joyride_gbuf_frame(const uint32_t **gb, int *pitch_px, int *rows);
+void joyride_gbuf_changes(void (*page)(void *ctx, int slot, const uint8_t *texels),
+                          void (*pal)(void *ctx, int slot, const uint32_t *colours), void *ctx);
+void joyride_gbuf_done(void);
+void joyride_gbuf_forget(void);
 
 /* the screen size in play (display.c): setup after boot, before run, with
  * the size wanted (0 x 0: the game's own); request from the overlay; apply
@@ -50,7 +58,8 @@ int  joyride_screen_scaling(int set);          /* set < 0: just read */
 const char *joyride_screen_scaling_name(int i); /* NULL past the last */
 int  joyride_screen_fullscreen(int set);
 void joyride_screen_refresh(void);             /* show the current frame again */
-uint64_t joyride_screen_next_slot(void);       /* when a paced flip can next show (SDL ns) */
+uint64_t joyride_screen_next_slot(void);
+int  joyride_screen_gpu_filter(void);          /* the presenter can filter on the GPU */       /* when a paced flip can next show (SDL ns) */
 void joyride_screen_key(int sdl_scancode, int down);   /* as if from the keyboard */
 
 /* 1 while joyride's Flip marks the primary (src/platform/screen_sdl3.c) */

@@ -19,15 +19,28 @@
  * colour 0 (transparent texels), zero neighbours carry no weight, so
  * cut-out edges keep their original shape and never pick up a dark fringe.
  *
+ * Two ways to do it (joyride_texfilter):
+ *   2, on the GPU, as the 3dfx card did: the loops draw the plain texel as
+ *      always and joyride_tex_fetch only records, per pixel, where it came
+ *      from (texture page slot, palette slot, position to 1/64 texel, the
+ *      clamp, and a 17-bit check of the colour written); the presenter
+ *      uploads that, the pages and palettes that changed, and
+ *      shaders/texfilter.frag re-samples the recorded pixels. A pixel drawn
+ *      over afterwards (HUD, text) fails its check and is left alone.
+ *   1, on the CPU: joyride_bilerp32 blends at the fetch and the colour load
+ *      writes the blend. Where the GPU path is not available (no SPIR-V).
+ *
  * 32-bit colour only: in 8-bit modes a blend has no palette entry, and the
  * 16-bit loops are not hooked yet. The F12 overlay switches it (overlay.c).
  */
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 
 #include "joyride_hle.h"
 
-uint32_t joyride_texfilter = 1;     /* read by the spliced code; the overlay sets it */
+uint32_t joyride_texfilter = 1;     /* 0 off, 1 CPU, 2 GPU; read by the spliced code */
 uint32_t joyride_texc;              /* the blend, from fetch to colour load */
 uint32_t joyride_texclamp = 1;      /* 1: world tile (64x64), 0: sprite (whole page) */
 
@@ -112,4 +125,213 @@ void joyride_tex_begin(uint32_t tile) {
     g_key = ~0u;
 }
 
+/* ---- the GPU path: what each pixel was drawn from ------------------------ */
 
+static uint32_t *g_gb;              /* 2 words a pixel, rows of the surface's pitch */
+static int g_gw, g_gh;              /* pixels a row (pitch / 4), rows */
+static int g_gb_used;               /* something recorded since the last frame */
+
+/* The record, 2 words a pixel (shaders/texfilter.frag reads it):
+ *   0: u | v << 14 | check >> 13 << 28, u and v 8.6 in the page
+ *   1: page slot (7 bits, 0 = none) | palette slot << 7 (10) |
+ *      transparent << 17 | tile << 18 | check << 19 (low 13 of 17)
+ * The 17-bit check of the colour written lets a pixel drawn over later (or
+ * left from an earlier frame) be told apart, so nothing is cleared. */
+#define MAXPAGES 128
+#define MAXPALS 1024
+
+/* texture pages (64 KB, 256x256 texels) by guest address >> 16 -> slot 1..127 */
+static uint8_t g_page_slot[65536];
+static uint32_t g_page_addr[256];
+static uint64_t g_page_hash[256];
+static uint8_t g_page_used[256];
+static int g_npages = 1;
+
+/* shading tables (256 colours, 256 bytes apart) -> slot 0..1023 */
+#define NPAL 4096
+static uint32_t g_pal_key[NPAL * 2];   /* open addressing: key, slot + 1 */
+static uint32_t g_pal_addr[NPAL];
+static uint64_t g_pal_hash[NPAL];
+static uint8_t g_pal_used[NPAL];
+static int g_npals;
+
+static uint8_t *g_frozen[256];
+static uint8_t g_free[256];
+static int g_nfree;
+static uint32_t g_last_pal = ~0u, g_last_page = ~0u;   /* a span keeps to one of each */
+static int g_last_pal_slot, g_last_page_slot;
+static int g_resets;
+static void reset_slots(void) {
+    g_resets++;
+    g_last_pal = g_last_page = ~0u;
+    for (int i = 0; i < 256; i++) free(g_frozen[i]), g_frozen[i] = NULL;
+    g_nfree = 0;
+    memset(g_page_slot, 0, sizeof g_page_slot), memset(g_page_hash, 0, sizeof g_page_hash);
+    memset(g_page_used, 0, sizeof g_page_used), g_npages = 1;
+    memset(g_pal_key, 0, sizeof g_pal_key), memset(g_pal_hash, 0, sizeof g_pal_hash);
+    memset(g_pal_used, 0, sizeof g_pal_used), g_npals = 0;
+}
+
+/* Pages the game rewrites mid-frame (its cache of converted tiles, 0x49B044,
+ * reuses slots as it goes): the pixels recorded so far need the texels as
+ * they were, so the page's slot keeps a copy of them and the page moves to
+ * a new slot for what comes after. Frozen slots are uploaded from the copy
+ * at the next frame and then freed. */
+
+static int new_slot(void) {
+    if (g_nfree) return g_free[--g_nfree];
+    if (g_npages >= MAXPAGES) reset_slots();
+    return g_npages++;
+}
+
+static int page_slot(uint32_t page) {
+    if (page == g_last_page) return g_last_page_slot;
+    uint32_t k = page >> 16;
+    int s = g_page_slot[k];
+    if (!s) {
+        s = new_slot();
+        g_page_slot[k] = (uint8_t)s, g_page_addr[s] = page, g_page_hash[s] = 0;
+    }
+    g_page_used[s] = 1;
+    g_last_page = page, g_last_page_slot = s;
+    return s;
+}
+
+/* Spliced at the tile converter's entry (0x49B044): about to write the
+ * 64x64 tile at `dst` (its rotated copy in the cache). */
+void joyride_tex_overwrite(uint32_t dst) {
+    if (joyride_texfilter != 2) return;
+    uint32_t k = dst >> 16;
+    int s = g_page_slot[k];
+    if (!s || !g_page_used[s] || g_frozen[s]) return;
+    if (!(g_frozen[s] = malloc(65536))) return;
+    memcpy(g_frozen[s], GUEST(k << 16), 65536);
+    g_page_slot[k] = 0;                                     /* the next use gets a new slot */
+    g_last_page = ~0u;
+}
+
+
+static int pal_slot(uint32_t pal) {
+    if (pal == g_last_pal) return g_last_pal_slot;
+    for (;;) {
+        uint32_t h = (pal * 2654435761u) >> 20;            /* 12 bits */
+        for (int i = 0; i < 64; i++) {
+            uint32_t *e = &g_pal_key[2 * ((h + (uint32_t)i) & (NPAL - 1))];
+            if (e[1] && e[0] == pal) {
+                g_pal_used[e[1] - 1] = 1;
+                g_last_pal = pal, g_last_pal_slot = (int)e[1] - 1;
+                return g_last_pal_slot;
+            }
+            if (!e[1]) {
+                if (g_npals >= MAXPALS) break;
+                int s = g_npals++;
+                e[0] = pal, e[1] = (uint32_t)s + 1;
+                g_pal_addr[s] = pal, g_pal_hash[s] = 0, g_pal_used[s] = 1;
+                g_last_pal = pal, g_last_pal_slot = s;
+                return s;
+            }
+        }
+        reset_slots();                                       /* full: start over */
+    }
+}
+
+static inline uint32_t check17(uint32_t c) {
+    c &= 0xFFFFFF;
+    return (c ^ (c >> 17) ^ (c << 7)) & 0x1FFFFu;
+}
+
+/* Spliced at each hooked texel fetch: `dst` is the pixel the loop is about
+ * to write, the rest as for joyride_bilerp32. */
+void joyride_tex_fetch(uint32_t dst, uint32_t addr, uint32_t fu, uint32_t fv, uint32_t pal, uint32_t transparent) {
+    if (joyride_texfilter == 1) { joyride_texc = joyride_bilerp32(addr, fu, fv, pal, transparent); return; }
+    uint32_t t = GUEST(addr)[0];
+    if (transparent && !t) return;                           /* the loop skips this texel */
+    uint32_t off = dst - MEM32(0x503228);                    /* row 0 of the surface drawn into */
+    uint32_t i = off >> 2;
+    if (!g_gb || (off & 3) || i >= (uint32_t)(g_gw * g_gh)) return;
+    pal &= 0xFFFF00FFu;
+    uint32_t u = (addr & 0xFF) << 6 | (fu & 0xFFFF) >> 10, v = (addr >> 8 & 0xFF) << 6 | (fv & 0xFFFF) >> 10;
+    uint32_t c = check17(colour(pal, t));
+    g_gb[2 * i] = u | v << 14 | (c >> 13) << 28;
+    g_gb[2 * i + 1] = (uint32_t)page_slot(addr & ~0xFFFFu) | (uint32_t)pal_slot(pal) << 7 |
+                      (transparent ? 1u : 0u) << 17 | joyride_texclamp << 18 | (c & 0x1FFFu) << 19;
+    g_gb_used = 1;
+}
+
+/* ---- for the presenter ---------------------------------------------------- */
+
+/* the surface the game draws into: pitch in pixels, rows */
+void joyride_gbuf_size(int pitch_px, int rows) {
+    if (pitch_px == g_gw && rows == g_gh && g_gb) return;
+    free(g_gb);
+    g_gw = pitch_px, g_gh = rows;
+    g_gb = calloc((size_t)pitch_px * (size_t)rows * 2, 4);
+    g_gb_used = 0;
+}
+
+/* the recording of the frame just drawn, if any */
+int joyride_gbuf_frame(const uint32_t **gb, int *pitch_px, int *rows) {
+    if (!g_gb_used || !g_gb) return 0;
+    *gb = g_gb, *pitch_px = g_gw, *rows = g_gh;
+    return 1;
+}
+
+static uint64_t hash(const uint8_t *p, size_t n) {
+    uint64_t h = 0x9E3779B97F4A7C15ull;
+    for (size_t i = 0; i + 8 <= n; i += 8) {
+        uint64_t w;
+        memcpy(&w, p + i, 8);
+        h = (h ^ w) * 0xFF51AFD7ED558CCDull;
+        h ^= h >> 29;
+    }
+    return h | 1;
+}
+
+/* pages used since the last frame whose texels changed since uploaded:
+ * calls `up` with slot and 64 KB; palettes likewise with 256 colours */
+void joyride_gbuf_changes(void (*page)(void *ctx, int slot, const uint8_t *texels),
+                          void (*pal)(void *ctx, int slot, const uint32_t *colours), void *ctx) {
+    for (int s = 1; s < g_npages; s++) {
+        if (g_frozen[s]) {                                   /* the copy, once; then the slot is free */
+            page(ctx, s, g_frozen[s]);
+            g_page_used[s] = 0, g_page_hash[s] = 0;
+            continue;
+        }
+        if (!g_page_used[s]) continue;
+        g_page_used[s] = 0;
+        const uint8_t *d = GUEST(g_page_addr[s]);
+        uint64_t h = hash(d, 65536);
+        if (h != g_page_hash[s]) { g_page_hash[s] = h; page(ctx, s, d); }
+    }
+    uint32_t c[256];
+    for (int s = 0; s < g_npals; s++) {
+        if (!g_pal_used[s]) continue;
+        g_pal_used[s] = 0;
+        for (int t = 0; t < 256; t++) c[t] = colour(g_pal_addr[s], (uint32_t)t) | 0xFF000000u;
+        uint64_t h = hash((const uint8_t *)c, sizeof c);
+        if (h != g_pal_hash[s]) { g_pal_hash[s] = h; pal(ctx, s, c); }
+    }
+}
+
+/* the frame is on its way: start the next recording clean */
+void joyride_gbuf_done(void) {
+    g_last_pal = g_last_page = ~0u;                           /* the used marks start over */
+    for (int s = 1; s < g_npages; s++)                        /* frozen copies were uploaded */
+        if (g_frozen[s]) { free(g_frozen[s]); g_frozen[s] = NULL; g_free[g_nfree++] = (uint8_t)s; }
+    static int n;
+    if (getenv("JOYRIDE_GBUF_DEBUG") && n++ % 50 == 0)
+        fprintf(stderr, "[gbuf] pages %d, palettes %d, resets %d\n", g_npages - 1, g_npals, g_resets);
+    g_gb_used = 0;                                            /* (stale entries fail their check) */
+}
+
+/* everything uploaded is gone (the GPU textures were remade) */
+void joyride_gbuf_forget(void) {
+    memset(g_page_hash, 0, sizeof g_page_hash), memset(g_pal_hash, 0, sizeof g_pal_hash);
+}
+
+/* filtering on or off: on the GPU when the presenter can (SPIR-V), else CPU */
+void joyride_texfilter_set(int on) {
+    const char *e = getenv("JOYRIDE_FILTER");               /* JOYRIDE_FILTER=cpu: never the GPU */
+    int cpu = e && !strcmp(e, "cpu");
+    joyride_texfilter = !on ? 0 : !cpu && joyride_screen_gpu_filter() ? 2 : 1;
+}

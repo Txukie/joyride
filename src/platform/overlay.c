@@ -62,7 +62,7 @@ void joyride_config_load(const char *path) {
         }
         joyride_cfg.res_w = w, joyride_cfg.res_h = h;
     }
-    if ((e = getenv("JOYRIDE_FILTER")) && *e) joyride_cfg.filter = *e != '0';
+    if ((e = getenv("JOYRIDE_FILTER")) && *e) joyride_cfg.filter = *e != '0';    /* "cpu": on, on the CPU */
     if ((e = getenv("JOYRIDE_SMOOTH")) && *e) joyride_cfg.smooth = *e != '0';
     if ((e = getenv("JOYRIDE_SCALE")) && *e)
         for (int i = 0; joyride_screen_scaling_name(i); i++)
@@ -129,7 +129,7 @@ static void change(int dir) {
         break;
     case ITEM_FILTER:
         joyride_cfg.filter = !joyride_cfg.filter;
-        joyride_texfilter = (uint32_t)joyride_cfg.filter;
+        joyride_texfilter_set(joyride_cfg.filter);
         joyride_config_save();
         break;
     case ITEM_SMOOTH:
@@ -228,7 +228,8 @@ void joyride_overlay_draw(uint32_t *bgra, int w, int h) {
             break;
         case ITEM_FILTER:
             snprintf(label, sizeof label, "Textures");
-            snprintf(val, sizeof val, "%s", joyride_cfg.filter ? "bilinear (3dfx)" : "sharp");
+            snprintf(val, sizeof val, "%s", !joyride_cfg.filter ? "sharp" :
+                     joyride_texfilter == 2 ? "bilinear (3dfx, GPU)" : "bilinear (3dfx, CPU)");
             break;
         case ITEM_SMOOTH:
             snprintf(label, sizeof label, "Motion");
