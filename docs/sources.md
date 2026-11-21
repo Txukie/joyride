@@ -1,12 +1,19 @@
 # Game sources compared
 
-Comparison of the original 1997 CD against the Steam release (build 252037),
-by SHA-1 of every file, case-insensitive paths.
+Comparison of the original 1997 CD, the Steam release (build 252037) and the
+2002 Rockstar Classics freeware release (`GTAINSTALLER.exe`, InstallShield 5,
+SHA-1 `762e03126a226e92e2f6827ca0750489595b52b2`), by SHA-1 of every file,
+case-insensitive paths.
+
+**The freeware release and Steam are byte-identical** — all 195 installed
+files match; Steam only adds its own `installscript.vdf`. Below, "Steam"
+stands for both.
 
 ## `GTADATA`
 
 * 169 files on the CD, 173 on Steam; **167 byte-identical**.
-* Differ: `PLAYER_A.DAT`, `REPLAY.REP` — save/replay state only.
+* Differ: `PLAYER_A.DAT`, `REPLAY.REP` — save/replay files; the 2002 release
+  ships different defaults (same in freeware and Steam, so not play state).
 * Steam only: `F_RSTAR.RAW`, `F_RSTARN.RAW`, `F_RSTAR white.RAW` (Rockstar
   splash), `replay1.rep` (save).
 
@@ -23,7 +30,7 @@ through Miles `AIL_redbook_*`; the Steam executable opens the WAV files.
 
 ## Windows executables
 
-| | CD `GTAWIN/Grand Theft Auto.exe` | Steam `WINO/Grand Theft Auto.exe` |
+| | CD `GTAWIN/Grand Theft Auto.exe` | Steam / freeware `WINO/Grand Theft Auto.exe` |
 | --- | --- | --- |
 | Timestamp | 1997-10-10 | 2002-11-11 |
 | File size | 909,824 | 774,144 |

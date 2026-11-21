@@ -26,14 +26,14 @@ Early setup. Nothing builds yet.
 
 ## Supported game data
 
-The game data is identical between the original CD and the Steam release
-(apart from saves), so either install works. See
+The game data is identical between the original CD, the Steam release and the
+free 2002 Rockstar Classics release (apart from saves), so any of them works. See
 [`docs/sources.md`](docs/sources.md).
 
 | Source | Executable used for recompilation | Music |
 | --- | --- | --- |
 | Original CD (1997) | `GTAWIN/Grand Theft Auto.exe` | CD audio tracks 2–11 |
-| Steam | not yet supported (2002 rebuild) | `Music/Track1–10.wav` |
+| Steam / Rockstar freeware (2002) | not yet supported (2002 rebuild) | `Music/Track1–10.wav` |
 
 ## License
 
