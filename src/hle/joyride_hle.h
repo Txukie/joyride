@@ -20,7 +20,8 @@ int  joyride_gbuf_frame(const uint32_t **gb, int *pitch_px, int *rows);
 void joyride_gbuf_changes(void (*page)(void *ctx, int slot, const uint8_t *texels),
                           void (*pal)(void *ctx, int slot, const uint32_t *colours), void *ctx);
 void joyride_gbuf_done(void);
-void joyride_gbuf_stats(int *pages, int *pals, int *resets, int *mid);
+void joyride_gbuf_stats(int *pages, int *pals, int *resets, int *mid, int *midpal);
+extern int joyride_tex_gpu_pages;           /* layers of the GPU's page texture */
 void joyride_gbuf_forget(void);
 
 /* the screen size in play (display.c): setup after boot, before run, with

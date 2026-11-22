@@ -146,6 +146,21 @@ uint32_t joyride_zoom_height(uint32_t z) {
     return (uint32_t)(int32_t)lrintf(((float)(int32_t)z + 320.0f) / g_zoom - 320.0f);
 }
 
+/* 0x43B7E0, at 0x43B877: a level's count of blocks across and down
+ * (`rec`, +0, +4), the screen's width and height over its tiles' size, + 3.
+ * The renderer projects the corners of that many blocks into tables of
+ * 65 x 65 (0x54F2A0, two of them, filled by 0x43B620) and nothing checks.
+ * Right after the switch to a big mode the size comes from the new mode's
+ * width and the old one's camera scale: 3840 pixels over the tiles of a
+ * 640 view, about 100 blocks. The rows past 65 went over the second table
+ * and on into the top level of the map's block types (0x55FAB0), the
+ * northern quarter of the city, where traffic then found "road" on the
+ * roofs and drove out onto them. At most 64, which no view needs. */
+void joyride_view_blocks(uint32_t rec) {
+    for (uint32_t i = 0; i < 2; i++)
+        if ((int32_t)MEM32(rec + 4 * i) > 64) MEM32(rec + 4 * i) = 64;
+}
+
 /* 0x43CA66 / 0x43BB62: the living area's half height (times 3, before
  * the game's shift), as the zoom shows more or less of the city */
 uint32_t joyride_live_zoom(uint32_t h3) {

@@ -168,7 +168,7 @@ See [`src/platform/map.c`](src/platform/map.c).
 D-pad left (F7) writes a report to `~/.local/share/joyride/debug/<time>/`
 for a bug report: `report.txt` (the settings, and the last ten seconds of
 play step by step and frame by frame: player, car, camera, controls,
-frame times; cars that turn up above street level), the next ten frames on screen (`screen_00.png` to
+frame times; cars that turn up above street level and which of the game's spawners set them up), the next ten frames on screen (`screen_00.png` to
 `screen_09.png`, written in the background over a few seconds), the
 game's own surface (`cpu.png`) and its memory (`memory.bin`). D-pad right
 (F8) gives every weapon with 99 rounds and, in a vehicle, turns it into

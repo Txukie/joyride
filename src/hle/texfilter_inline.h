@@ -43,6 +43,8 @@ void joyride_tex_record(uint32_t dst, uint32_t addr, uint32_t fu, uint32_t fv, u
     uint32_t page = addr & ~0xFFFFu;
     uint32_t ps = page == joyride_gb_last_page ? joyride_gb_last_page_slot : joyride_tex_page_slot(page);
     uint32_t qs = pal == joyride_gb_last_pal ? joyride_gb_last_pal_slot : joyride_tex_pal_slot(pal);
+    if ((ps | qs >> 3) > 127) return;                        /* past the record's 7 and 10 bits (the GPU
+                                                                renderer's slots go higher): unfiltered */
     uint32_t c = JR_G32(pal + (t << 8)) & 0xFFFFFFu;
     c = (c ^ (c >> 17) ^ (c << 7)) & 0x1FFFFu;               /* the check (shaders/texfilter.frag) */
     uint32_t u = (addr & 0xFF) << 6 | (fu & 0xFFFF) >> 10, v = (addr >> 8 & 0xFF) << 6 | (fv & 0xFFFF) >> 10;

@@ -151,16 +151,20 @@ static int g_gw, g_gh;              /* pixels a row (pitch / 4), rows */
  * left from an earlier frame) be told apart, so nothing is cleared. */
 /* the filter's record packs page and palette slots in 7 and 10 bits; the
  * GPU renderer's quads carry them whole, so it can use what the GPU
- * textures hold (256 pages, 4096 palette rows; the palette table below is
- * kept at half full) */
-#define MAXPAGES (joyride_hwrender ? 255 : 128)
+ * textures hold (joyride_tex_gpu_pages layers, 4096 palette rows; the
+ * palette table below is kept at half full). In some spots the game
+ * rewrites its tile cache dozens of times a frame, and each rewrite of a
+ * page drawn from takes a new slot (joyride_tex_overwrite): 255 ran out. */
+#define NSLOT 1024
+int joyride_tex_gpu_pages = 256;          /* layers of the GPU's page texture (screen_sdl3.c) */
+#define MAXPAGES (joyride_hwrender ? joyride_tex_gpu_pages - 1 : 128)
 #define MAXPALS (joyride_hwrender ? 2048 : 1024)
 
 /* texture pages (64 KB, 256x256 texels) by guest address >> 16 -> slot 1..127 */
-static uint8_t g_page_slot[65536];
-static uint32_t g_page_addr[256];
-static uint64_t g_page_hash[256];
-static uint8_t g_page_used[256];
+static uint16_t g_page_slot[65536];
+static uint32_t g_page_addr[NSLOT];
+static uint64_t g_page_hash[NSLOT];
+static uint8_t g_page_used[NSLOT];
 static int g_npages = 1;
 
 /* shading tables (256 colours, 256 bytes apart) -> slot 0..1023 */
@@ -171,14 +175,14 @@ static uint64_t g_pal_hash[NPAL];
 static uint8_t g_pal_used[NPAL];
 static int g_npals;
 
-static uint8_t *g_frozen[256];
-static uint8_t g_free[256];
+static uint8_t *g_frozen[NSLOT];
+static uint16_t g_free[NSLOT];
 static int g_nfree;
-static int g_resets, g_resets_mid;   /* all, and those mid-frame */
+static int g_resets, g_resets_mid, g_resets_pal;   /* all, those mid-frame, those for palettes */
 static void reset_slots(void) {
     g_resets++;
     g_last_pal = g_last_page = ~0u;
-    for (int i = 0; i < 256; i++) free(g_frozen[i]), g_frozen[i] = NULL;
+    for (int i = 0; i < NSLOT; i++) free(g_frozen[i]), g_frozen[i] = NULL;
     g_nfree = 0;
     memset(g_page_slot, 0, sizeof g_page_slot), memset(g_page_hash, 0, sizeof g_page_hash);
     memset(g_page_used, 0, sizeof g_page_used), g_npages = 1;
@@ -209,7 +213,7 @@ static int page_slot(uint32_t page) {
     int s = g_page_slot[k];
     if (!s) {
         s = new_slot();
-        g_page_slot[k] = (uint8_t)s, g_page_addr[s] = page, g_page_hash[s] = 0;
+        g_page_slot[k] = (uint16_t)s, g_page_addr[s] = page, g_page_hash[s] = 0;
     }
     g_page_used[s] = 1;
     g_last_page = page, g_last_page_slot = (uint32_t)s;
@@ -234,7 +238,7 @@ static int pal_slot(uint32_t pal) {
     if (pal == g_last_pal) return (int)g_last_pal_slot;
     for (;;) {
         uint32_t h = (pal * 2654435761u) >> 20;            /* 12 bits */
-        for (int i = 0; i < 64; i++) {
+        for (int i = 0; i < NPAL; i++) {                    /* at most half full: ends at a free entry */
             uint32_t *e = &g_pal_key[2 * ((h + (uint32_t)i) & (NPAL - 1))];
             if (e[1] && e[0] == pal) {
                 g_pal_used[e[1] - 1] = 1;
@@ -250,7 +254,7 @@ static int pal_slot(uint32_t pal) {
                 return s;
             }
         }
-        g_resets_mid++, reset_slots();                       /* full: start over */
+        g_resets_mid++, g_resets_pal++, reset_slots();       /* full: start over */
     }
 }
 
@@ -322,7 +326,7 @@ void joyride_gbuf_changes(void (*page)(void *ctx, int slot, const uint8_t *texel
 void joyride_gbuf_done(void) {
     g_last_pal = g_last_page = ~0u;                           /* the used marks start over */
     for (int s = 1; s < g_npages; s++)                        /* frozen copies were uploaded */
-        if (g_frozen[s]) { free(g_frozen[s]); g_frozen[s] = NULL; g_free[g_nfree++] = (uint8_t)s; }
+        if (g_frozen[s]) { free(g_frozen[s]); g_frozen[s] = NULL; g_free[g_nfree++] = (uint16_t)s; }
     static int n;
     if (getenv("JOYRIDE_GBUF_DEBUG") && n++ % 50 == 0)
         fprintf(stderr, "[gbuf] pages %d, palettes %d, resets %d\n", g_npages - 1, g_npals, g_resets);
@@ -330,8 +334,8 @@ void joyride_gbuf_done(void) {
     if (g_npages - g_nfree > MAXPAGES * 3 / 4 || g_npals > MAXPALS * 3 / 4) reset_slots();
 }
 
-void joyride_gbuf_stats(int *pages, int *pals, int *resets, int *mid) {
-    *pages = g_npages - 1 - g_nfree, *pals = g_npals, *resets = g_resets, *mid = g_resets_mid;
+void joyride_gbuf_stats(int *pages, int *pals, int *resets, int *mid, int *midpal) {
+    *pages = g_npages - 1 - g_nfree, *pals = g_npals, *resets = g_resets, *mid = g_resets_mid, *midpal = g_resets_pal;
 }
 
 /* everything uploaded is gone (the GPU textures were remade) */

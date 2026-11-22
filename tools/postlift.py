@@ -135,6 +135,10 @@ TEXAFTER[0x0043CA66] = ("{ extern uint32_t joyride_live_half_width(uint32_t, uin
 TEXAFTER[0x0043BB62] = ("{ extern uint32_t joyride_live_half_width(uint32_t, uint32_t); "
                         "extern uint32_t joyride_live_zoom(uint32_t); "
                         "eax = joyride_live_zoom(eax); ecx = joyride_live_half_width(ecx, esi); }")
+# The renderer's count of blocks across and down for each level (0x43B7E0),
+# before it is used: kept within its corner tables (src/hle/display.c).
+TEXAFTER[0x0043B877] = ("{ extern void joyride_view_blocks(uint32_t); "
+                        "joyride_view_blocks(ecx); ebp = MEM32(ecx); }")
 # Progressive throttle (src/platform/pad.c): the player's car's engine force
 # for this step is set (0x40A2E0: +0x188, from +0x14C when the throttle is
 # on, a share of it backwards); scale it by how far the trigger is pressed.
@@ -145,6 +149,13 @@ TEXAFTER[0x0040A418] = ("{ extern void joyride_pad_throttle(uint32_t); joyride_p
 # at the zoomed size; the game's own camera is left alone.
 for _a, _r in ((0x0043B63E, "edi"), (0x0043B7A0, "ecx"), (0x0043B805, "esi")):
     TEXAFTER[_a] = (f"{{ extern uint32_t joyride_zoom_height(uint32_t); {_r} = joyride_zoom_height({_r}); }}")
+# Debug reports (src/platform/debug.c): each call of the car setup
+# 0x4067C0 (x, y, z, heading, model, slot), right after it returns with its
+# arguments still on the stack, so a car seen somewhere odd can be told by
+# which of the game's spawners made it.
+for _a in (0x00407439, 0x00407654, 0x0040780E, 0x004079FE, 0x00407B71, 0x00407C90, 0x00407D77):
+    TEXAFTER[_a] = (f"{{ extern void joyride_debug_car_made(uint32_t, uint32_t); "
+                    f"joyride_debug_car_made(0x{_a:X}u, esp); }}")
 ADDR = re.compile(r"/\* 0x([0-9A-F]{8}): ")
 
 GOTO = re.compile(r"goto L_([0-9A-F]{8});.*/\* 0x([0-9A-F]{8}): (j\w*|loop\w*) ")
@@ -171,7 +182,7 @@ def process(path: str) -> int:
                 added += 1
         out.append(line)
         a = ADDR.search(line)
-        if a and int(a.group(1), 16) in TEXAFTER and line.lstrip().startswith(("SET_HI8", "SET_LO8(eax, MEM8(0x503224))", "SET_LO8(eax, MEM8(0x502F34))", "RECOMP_CALL(sub_00430B20)", "RECOMP_CALL(sub_00430D40)",
+        if a and int(a.group(1), 16) in TEXAFTER and line.lstrip().startswith(("SET_HI8", "SET_LO8(eax, MEM8(0x503224))", "SET_LO8(eax, MEM8(0x502F34))", "RECOMP_CALL(sub_00430B20)", "RECOMP_CALL(sub_004067C0)", "ebp = MEM32(ecx);", "RECOMP_CALL(sub_00430D40)",
         "esp = esp - 0x10u", "esp = esp + 0x10u", "PUSH32(esp, esi)", "eax = MEM32(0x775580)", "edi = MEM32(0x4B8C58)", "eax = MEM32(esp + 0xC)", "esp = esp + 0x10u", "MEM32(ecx) = ebx", "MEM32(ecx + 0x24) = edx", "MEM8(ecx + 0x74F18C)", "edx =", "esi =", "PUSH32(esp, ebp)", "/* cmp MEM16(esi + 0x22), 0x25u */", "ecx = MEM32(eax + 0x18)", "edi = MEM32(ecx + 0x18)")):
             if True:
                 indent = line[:len(line) - len(line.lstrip())]

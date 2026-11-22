@@ -391,8 +391,10 @@ static int filter_init(void) {
     g_linear = SDL_CreateGPUSampler(g_gpu, &si);
     SDL_GPUTextureCreateInfo pg = { .type = SDL_GPU_TEXTURETYPE_2D_ARRAY, .format = SDL_GPU_TEXTUREFORMAT_R8_UINT,
                                     .usage = SDL_GPU_TEXTUREUSAGE_SAMPLER, .width = 256, .height = 256,
-                                    .layer_count_or_depth = 256, .num_levels = 1 };
-    g_pages = SDL_CreateGPUTexture(g_gpu, &pg);
+                                    .layer_count_or_depth = 1024, .num_levels = 1 };
+    g_pages = SDL_CreateGPUTexture(g_gpu, &pg);    /* 256 layers is all a GPU has to allow */
+    if (!g_pages) pg.layer_count_or_depth = 256, g_pages = SDL_CreateGPUTexture(g_gpu, &pg);
+    joyride_tex_gpu_pages = (int)pg.layer_count_or_depth;
     g_pals = make_tex(256, 4096, SDL_GPU_TEXTUREUSAGE_SAMPLER);
     g_filter_ok = g_fpipe && g_near && g_pages && g_pals;
     if (!g_filter_ok) fprintf(stderr, "[screen] texture filtering on the GPU unavailable: %s\n", SDL_GetError());
@@ -404,10 +406,10 @@ static int filter_init(void) {
 int joyride_screen_gpu_filter(void) { return filter_init(); }
 
 /* what changed this frame, gathered before the upload */
-typedef struct { int npages, npals; int page_slot[256]; const uint8_t *page[256]; int pal_slot[4096]; uint32_t *pals; } changes_t;
+typedef struct { int npages, npals; int page_slot[1024]; const uint8_t *page[1024]; int pal_slot[4096]; uint32_t *pals; } changes_t;
 static void on_page(void *ctx, int slot, const uint8_t *texels) {
     changes_t *c = ctx;
-    if (c->npages < 256) c->page_slot[c->npages] = slot, c->page[c->npages++] = texels;
+    if (c->npages < 1024) c->page_slot[c->npages] = slot, c->page[c->npages++] = texels;
 }
 static void on_pal(void *ctx, int slot, const uint32_t *colours) {
     changes_t *c = ctx;

@@ -65,7 +65,21 @@ static uint32_t rec(void) { return 0x74F160u + MEM32(0x74F83C) * 444u; }
  * Street level is z 255 (16.16 >> 16; smaller is higher). */
 #define NCARS 400
 #define NCAREV 128
-typedef struct { uint32_t step; int id, model, driver, f6, x, y, z, px, py, pz; } carev_t;
+/* each car's last setup (0x4067C0, spliced at its callers): where it was
+ * called from, the height asked for, and the guest stack above it, which
+ * holds the arguments of the spawners further up */
+#define NSTACK 16
+typedef struct { uint32_t site, step; int32_t z; uint32_t stack[NSTACK]; } made_t;
+static made_t g_made[NCARS];
+void joyride_debug_car_made(uint32_t site, uint32_t esp) {
+    int slot = (int16_t)MEM16(esp + 20);
+    if (slot < 0 || slot >= NCARS) return;
+    made_t *m = &g_made[slot];
+    m->site = site, m->step = g_step, m->z = (int32_t)MEM32(esp + 8);
+    for (int i = 0; i < NSTACK; i++) m->stack[i] = MEM32(esp + 4u * (uint32_t)i);
+}
+
+typedef struct { uint32_t step; int id, model, driver, f6, x, y, z, px, py, pz; made_t made; } carev_t;
 static carev_t g_carev[NCAREV];
 static uint32_t g_ncarev;
 static int32_t g_cx[NCARS], g_cy[NCARS], g_cz[NCARS];
@@ -77,7 +91,7 @@ static void watch_cars(void) {
         if ((x || y) && z < 200 && (moved || g_cz[i] - z > 32)) {
             carev_t *e = &g_carev[g_ncarev++ % NCAREV];
             *e = (carev_t){ g_step, i, (int16_t)MEM16(c + 0x22), (int16_t)MEM16(c + 2), (int16_t)MEM16(c + 6), x, y, z,
-                            g_cx[i], g_cy[i], g_cz[i] };
+                            g_cx[i], g_cy[i], g_cz[i], g_made[i] };
         }
         g_cx[i] = x, g_cy[i] = y, g_cz[i] = z;
     }
@@ -145,9 +159,10 @@ void joyride_debug_report(void) {
             c->res_w, c->res_h, sw, sh, MEM32(0x504CB8), c->filter, joyride_texfilter, c->scaling, c->fullscreen, c->smooth,
             c->hwrender ? "gpu" : "software", c->controls_modern ? "modern" : "classic");
     fprintf(f, "frame period %.3f ms (cap), hw renderer active %d\n", joyride_screen_frame_ns() / 1e6, joyride_hw_active());
-    int gp, gq, gr, gm;
-    joyride_gbuf_stats(&gp, &gq, &gr, &gm);
-    fprintf(f, "texture slots: pages %d, palettes %d; started over %d times (%d mid-frame)\n", gp, gq, gr, gm);
+    int gp, gq, gr, gm, gmp;
+    joyride_gbuf_stats(&gp, &gq, &gr, &gm, &gmp);
+    fprintf(f, "texture slots: pages %d of %d, palettes %d; started over %d times (%d mid-frame, %d of them for palettes)\n",
+            gp, joyride_tex_gpu_pages, gq, gr, gm, gmp);
     uint32_t r = rec();
     fprintf(f, "player %u: state %u id %u; weapons", MEM32(0x74F83C), MEM32(r + 0xA4), MEM32(r + 0xA8) & 0xFFFF);
     for (int w = 0; w < 5; w++) fprintf(f, " %u", MEM8(r + 0x13F + w));
@@ -181,11 +196,14 @@ void joyride_debug_report(void) {
         prev = fr->ns;
     }
     fprintf(f, "\nCARS ABOVE THE STREET (appeared there, or rose; z 255 is street level, smaller is higher)\n");
-    fprintf(f, "step car model driver f6 | x y z | was x y z\n");
+    fprintf(f, "step car model driver f6 | x y z | was x y z | set up at step, from, z asked | stack\n");
     n = g_ncarev < NCAREV ? g_ncarev : NCAREV;
     for (uint32_t i = g_ncarev - n; i != g_ncarev; i++) {
         const carev_t *e = &g_carev[i % NCAREV];
-        fprintf(f, "%u %d %d %d %d | %d %d %d | %d %d %d\n", e->step, e->id, e->model, e->driver, e->f6, e->x, e->y, e->z, e->px, e->py, e->pz);
+        fprintf(f, "%u %d %d %d %d | %d %d %d | %d %d %d | %u %08X %.2f |", e->step, e->id, e->model, e->driver, e->f6,
+                e->x, e->y, e->z, e->px, e->py, e->pz, e->made.step, e->made.site, e->made.z / 65536.0);
+        for (int k = 0; k < NSTACK; k++) fprintf(f, " %X", e->made.stack[k]);
+        fprintf(f, "\n");
     }
     fclose(f);
     save_memory(dir);
