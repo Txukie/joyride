@@ -62,8 +62,7 @@ void joyride_pad_poll(void);                /* each pump: the pad in menus (pad.
 void joyride_map_init(const char *install_root, const char *data_dir);
 void joyride_map_toggle(void);
 int  joyride_map_open(void);
-void joyride_map_zoom(int dir);
-void joyride_map_view(uint32_t ms, const float player[2], float view[3]);
+void joyride_camera_zoom(int dir);         /* the play view (display.c) */
 const uint8_t *joyride_map_picture(int *size, int *id);
 int  joyride_map_dots(float player[2], float obj[][2], int max);
 

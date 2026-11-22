@@ -107,9 +107,34 @@ void joyride_mode_size(uint32_t wp, uint32_t hp) {
 }
 
 /* The camera: each view's scale (0x43BB30) is its width * zoom / 320. */
+/* joyride's camera zoom (d-pad up/down, + and -): a factor on the scale,
+ * eased towards the level chosen each time the game sets the scale (each
+ * step; smooth.c interpolates the scale between steps). */
+static const float k_zoom[] = { 0.5f, 0.625f, 0.75f, 0.875f, 1.0f, 1.25f, 1.5f, 2.0f };
+#define ZOOM_DEFAULT 4
+static int g_zoom_i = ZOOM_DEFAULT;
+static float g_zoom = 1.0f;
+
+void joyride_camera_zoom(int dir) {
+    int n = (int)(sizeof k_zoom / sizeof *k_zoom);
+    g_zoom_i += dir > 0 ? 1 : -1;
+    if (g_zoom_i < 0) g_zoom_i = 0;
+    if (g_zoom_i >= n) g_zoom_i = n - 1;
+}
+
 uint32_t joyride_view_scale(uint32_t view_h, uint32_t zoom, uint32_t scale) {
     (void)scale;
-    return (uint32_t)(int32_t)((int64_t)((int64_t)view_h * 4 / 3) * (int32_t)zoom / 320);
+    float want = k_zoom[g_zoom_i];
+    g_zoom += (want - g_zoom) * 0.3f;                  /* about a third of a second */
+    if (g_zoom > want * 0.995f && g_zoom < want * 1.005f) g_zoom = want;
+    int64_t s = (int64_t)((int64_t)view_h * 4 / 3) * (int32_t)zoom / 320;
+    return (uint32_t)(int32_t)(int64_t)((float)s * g_zoom);
+}
+
+/* 0x43CA66 / 0x43BB62: the living area's half height (times 3, before
+ * the game's shift), as the zoom shows more or less of the city */
+uint32_t joyride_live_zoom(uint32_t h3) {
+    return (uint32_t)(int32_t)((float)(int32_t)h3 / g_zoom);
 }
 
 /* 0x43CA66: the half width (world pixels) of the area peds and cars live
@@ -119,6 +144,7 @@ uint32_t joyride_live_half_width(uint32_t half, uint32_t v) {
     static int off = -1;
     if (off < 0) off = getenv("JOYRIDE_NARROW_LIVE") != NULL;   /* tests: the game's own 4:3 area */
     if (off) return half;
+    half = (uint32_t)(int32_t)((float)(int32_t)half / g_zoom);   /* the zoom shows more or less */
     int64_t w = (int32_t)MEM32(v + 8), h = (int32_t)MEM32(v + 0xC);
     if (h <= 0 || w * 3 <= h * 4) return half;
     return (uint32_t)((int64_t)(int32_t)half * w * 3 / (h * 4));

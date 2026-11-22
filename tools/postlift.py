@@ -129,10 +129,16 @@ ROWS_M1 = (re.compile(r"(MEM32\(\w+ \* 4 \+ )0x503224\)"), r"\1joyride_rows - 4u
 # screen they pop in and out in view; joyride widens it to the view's
 # shape (src/hle/display.c), once the half height is taken.
 TEXAFTER[0x0043CA66] = ("{ extern uint32_t joyride_live_half_width(uint32_t, uint32_t); "
-                        "edi = joyride_live_half_width(edi, esi); }")
+                        "extern uint32_t joyride_live_zoom(uint32_t); "
+                        "eax = joyride_live_zoom(eax); edi = joyride_live_half_width(edi, esi); }")
 # the same, each frame, in the camera update (0x43BB30; half width in ecx)
 TEXAFTER[0x0043BB62] = ("{ extern uint32_t joyride_live_half_width(uint32_t, uint32_t); "
-                        "ecx = joyride_live_half_width(ecx, esi); }")
+                        "extern uint32_t joyride_live_zoom(uint32_t); "
+                        "eax = joyride_live_zoom(eax); ecx = joyride_live_half_width(ecx, esi); }")
+# Progressive throttle (src/platform/pad.c): the player's car's engine force
+# for this step is set (0x40A2E0: +0x188, from +0x14C when the throttle is
+# on, a share of it backwards); scale it by how far the trigger is pressed.
+TEXAFTER[0x0040A418] = ("{ extern void joyride_pad_throttle(uint32_t); joyride_pad_throttle(esi); }")
 ADDR = re.compile(r"/\* 0x([0-9A-F]{8}): ")
 
 GOTO = re.compile(r"goto L_([0-9A-F]{8});.*/\* 0x([0-9A-F]{8}): (j\w*|loop\w*) ")
@@ -160,7 +166,7 @@ def process(path: str) -> int:
         out.append(line)
         a = ADDR.search(line)
         if a and int(a.group(1), 16) in TEXAFTER and line.lstrip().startswith(("SET_HI8", "SET_LO8(eax, MEM8(0x503224))", "SET_LO8(eax, MEM8(0x502F34))", "RECOMP_CALL(sub_00430B20)", "RECOMP_CALL(sub_00430D40)",
-        "esp = esp - 0x10u", "esp = esp + 0x10u", "PUSH32(esp, esi)", "eax = MEM32(0x775580)", "edi = MEM32(0x4B8C58)", "eax = MEM32(esp + 0xC)", "esp = esp + 0x10u", "MEM32(ecx) = ebx", "MEM32(ecx + 0x24) = edx", "MEM8(ecx + 0x74F18C)", "edx =", "esi =", "PUSH32(esp, ebp)")):
+        "esp = esp - 0x10u", "esp = esp + 0x10u", "PUSH32(esp, esi)", "eax = MEM32(0x775580)", "edi = MEM32(0x4B8C58)", "eax = MEM32(esp + 0xC)", "esp = esp + 0x10u", "MEM32(ecx) = ebx", "MEM32(ecx + 0x24) = edx", "MEM8(ecx + 0x74F18C)", "edx =", "esi =", "PUSH32(esp, ebp)", "/* cmp MEM16(esi + 0x22), 0x25u */")):
             if True:
                 indent = line[:len(line) - len(line.lstrip())]
                 out.append(f"{indent}{TEXAFTER[int(a.group(1), 16)]}\n")

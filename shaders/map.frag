@@ -2,8 +2,7 @@
 // joyride - the city map over the game (src/platform/map.c): the map,
 // scaled to fit the picture and centred, at 70%; the player a bright blue
 // dot, objectives bright red, each with a dark rim so they read on any
-// part of the map. Zoomed in, a part of the city fills the square (view);
-// objectives outside it are pinned to its edge, so the way still shows.
+// part of the map. `view` is the part of the city shown (all of it).
 
 layout(set = 2, binding = 0) uniform sampler2D map;
 layout(set = 3, binding = 0) uniform Params {

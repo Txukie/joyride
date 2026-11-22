@@ -35,8 +35,8 @@
  *           tank the right stick aims the turret (turret() below).
  *   classic The game's tank controls on the pad: left stick steers and
  *           its up/down (or R2/L2) go forward/back, same buttons.
- * Start: the game's own pause (F6). Select: the city map;
- * while it is open, d-pad up and down zoom it in and out. L3+R3: the
+ * Start: the game's own pause (F6). Select: the city map. D-pad up and
+ * down zoom the game in and out (display.c). L3+R3: the
  * settings overlay (F1). Outside play (the game's menus, the overlay) the
  * pad works them as the keyboard does: joyride_pad_poll at the end.
  *
@@ -224,26 +224,38 @@ static int turret(const pad_t *p, uint32_t car) {
     return 1;
 }
 
+/* how far the triggers are pressed, for the car being driven (0: none) */
+static float g_share_fwd = 1, g_share_back = 1;
+static uint32_t g_share_car;
+
+/* Spliced at 0x40A418, in each car's controls (0x40A2E0, the car at
+ * `car`): its engine force for this step, +0x188, is set; positive pushes
+ * forward. The player's car, driven with the modern scheme, gets the share
+ * its trigger asks for. */
+void joyride_pad_throttle(uint32_t car) {
+    if (car != g_share_car) return;
+    float *force = (float *)hle_ptr(car + 0x188);
+    float k = *force > 0 ? g_share_fwd : g_share_back;
+    if (k > 0 && k < 1) *force *= k;
+}
+
 static void driving_modern(const pad_t *p, uint32_t prev_buttons, uint32_t rec) {
     uint32_t car = 0x4BE248u + (MEM32(rec + 0xA8) & 0xFFFF) * 688u;
     int aiming = turret(p, car);
     if (!aiming) steer((int)lrintf(dead(p->lx, 0.15f) * 7.0f));
     /* Progressive triggers: the game's throttle and brake are on or off
-     * (0x40A39B only asks whether the level is nonzero), so a trigger
-     * pressed part way switches them on for that share of the steps
-     * (Bresenham, 23 a second). The cars have drag: half throttle gives
-     * half the acceleration and levels off at about half the top speed;
-     * half brake slows half as hard. */
-    static float acc_fwd, acc_back;
+     * (0x40A39B only asks whether the level is nonzero), so joyride keeps
+     * them on while a trigger is pressed at all, and scales the engine
+     * force the game sets for the step by how far it is pressed
+     * (joyride_pad_throttle). The cars have drag: half throttle gives half
+     * the push and levels off at about half the top speed; half brake
+     * slows half as hard. */
     float tf = dead(p->rt, 0.08f), tb = dead(p->lt, 0.08f);
     if (tf > 0.95f) tf = 1;
     if (tb > 0.95f) tb = 1;
     if (tf > 0) tb = 0;                                      /* both: accelerate wins */
-    int fwd = 0, back = 0;
-    acc_fwd = tf > 0 ? acc_fwd + tf : 0;
-    if (acc_fwd >= 1) acc_fwd -= 1, fwd = 3;
-    acc_back = tb > 0 ? acc_back + tb : 0;
-    if (acc_back >= 1) acc_back -= 1, back = 3;
+    int fwd = tf > 0 ? 3 : 0, back = tb > 0 ? 3 : 0;
+    g_share_fwd = tf, g_share_back = tb, g_share_car = car;
     throttle(fwd, back);
     static int log = -1;
     if (log < 0) log = getenv("JOYRIDE_PAD_LOG") != NULL;
@@ -280,6 +292,7 @@ void joyride_pad_input(uint32_t word) {
     g_play_ms = SDL_GetTicks() ? (uint32_t)SDL_GetTicks() : 1;
     pad_t p;
     read_pad(&p);
+    g_share_car = 0;                                        /* set again below while driving */
     if (!p.present) { prev = 0; return; }
     g_word = word;
     uint32_t rec = 0x74F160u + MEM32(0x74F83C) * 444u;
@@ -293,8 +306,9 @@ void joyride_pad_input(uint32_t word) {
     if (pressed & BTN(SDL_GAMEPAD_BUTTON_START)) joyride_screen_key(SDL_SCANCODE_F6, 1);
     if (released & BTN(SDL_GAMEPAD_BUTTON_START)) joyride_screen_key(SDL_SCANCODE_F6, 0);
     if (pressed & BTN(SDL_GAMEPAD_BUTTON_BACK)) joyride_map_toggle();      /* Select: the map (map.c) */
-    if (pressed & BTN(SDL_GAMEPAD_BUTTON_DPAD_UP)) joyride_map_zoom(+1);   /* zoom it, while open */
-    if (pressed & BTN(SDL_GAMEPAD_BUTTON_DPAD_DOWN)) joyride_map_zoom(-1);
+    /* d-pad up / down: zoom the game in / out (display.c) */
+    if (pressed & BTN(SDL_GAMEPAD_BUTTON_DPAD_UP)) joyride_camera_zoom(+1);
+    if (pressed & BTN(SDL_GAMEPAD_BUTTON_DPAD_DOWN)) joyride_camera_zoom(-1);
     prev = p.buttons;
 }
 

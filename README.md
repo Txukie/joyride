@@ -125,7 +125,9 @@ you aim doesn't move.
 | L1 / R1 | previous / next radio station |
 
 **Both:** Start pauses the game (its own pause, as F6 does; again to
-resume); Select shows the city map; L3+R3 opens the settings. In the
+resume); Select shows the city map; d-pad up / down zoom the game in and
+out (from twice as close to twice as far; + and - on the keyboard);
+L3+R3 opens the settings. In the
 game's menus the d-pad or left stick move, A (or Start) accepts and B goes
 back.
 
@@ -135,9 +137,10 @@ up/down or R2/L2 go forward and back, same buttons.
 How it works: joyride adds the pad's input to the game's own per-step action
 word through the game's own handlers (`src/platform/pad.c`), so network
 games stay in step; the one exception is the instant turn on foot, which
-sets the character's heading directly. The game's throttle and brake are
-on or off, so a trigger pressed part way switches them on for that share
-of the game's steps; the cars have drag, so half throttle also levels off
+sets the character's heading directly, and the triggers' share of the
+engine. The game's throttle and brake are on or off, so joyride keeps them
+on and scales the push the game gives the car each step by how far the
+trigger is pressed; the cars have drag, so half throttle also levels off
 at about half the top speed. The radio stations are the game's ten music tracks;
 L1/R1 move the car's music to the next or previous one without stopping,
 and the next car you get into plays its own station again.
@@ -158,9 +161,6 @@ person, and the red arrow's) as bright red dots. GTA has no map picture, so
 joyride draws one for each of the three cities from the game's own map and
 texture files the first time it runs (a few seconds, in the background) and
 keeps them in `~/.local/share/joyride/maps/`; delete them to rebuild.
-While it is open, d-pad up and down (or + and - on the keyboard) zoom in
-and out, from the whole city to 8x; zoomed in, the map follows you, and
-objectives out of view stay pinned to its edge.
 See [`src/platform/map.c`](src/platform/map.c).
 
 ### Keys
@@ -168,7 +168,8 @@ See [`src/platform/map.c`](src/platform/map.c).
 | Key | |
 | --- | --- |
 | F1 | settings: screen size, renderer, textures, motion, controller, scaling, fullscreen |
-| M | city map (+ / - zoom it while open) |
+| M | city map |
+| + / - | zoom the game in / out |
 | F6 | pause (the game's own) |
 | F11, Alt+Enter | fullscreen |
 | Esc, then Enter | quit (the game's own menu); closing the window twice also quits |
