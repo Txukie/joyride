@@ -264,6 +264,7 @@ int main(int argc, char **argv) {
     char datadir[PATH_MAX + 8];
     snprintf(datadir, sizeof datadir, "%s/..", overlay);
     joyride_map_init(root, datadir);                     /* builds the city maps the first time */
+    joyride_debug_init(datadir);
     joyride_texfilter_set(joyride_cfg.filter);
     joyride_smooth = joyride_cfg.smooth;
     joyride_hwrender = joyride_cfg.hwrender;

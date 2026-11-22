@@ -58,7 +58,15 @@ void joyride_pad_event(const void *sdl_event);
 void joyride_radio_step(int dir);
 
 /* the city map (src/platform/map.c) */
-void joyride_pad_poll(void);                /* each pump: the pad in menus (pad.c) */
+void joyride_pad_poll(void);
+void joyride_pad_state(float axes[6], uint32_t *buttons, float *share_f, float *share_b);
+/* debugging (src/platform/debug.c) */
+void joyride_debug_init(const char *data_dir);
+void joyride_debug_step(uint32_t word);
+void joyride_debug_frame(int kind, int32_t t, uint64_t slot_ns);
+void joyride_debug_report(void);
+void joyride_debug_give(void);
+void joyride_screen_snapshot(const char *dir);     /* the next frame presented, saved there */                /* each pump: the pad in menus (pad.c) */
 void joyride_map_init(const char *install_root, const char *data_dir);
 void joyride_map_toggle(void);
 int  joyride_map_open(void);

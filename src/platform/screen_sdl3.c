@@ -661,6 +661,42 @@ static void headless_dump(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *src, int w,
     SDL_ReleaseGPUTransferBuffer(g_gpu, down);
 }
 
+/* debug.c's report: the next frame presented is saved in that directory,
+ * as the GPU made it (screen.ppm) and as the game's surface (cpu.ppm) */
+static char g_snap[4300];
+void joyride_screen_snapshot(const char *dir) { snprintf(g_snap, sizeof g_snap, "%s", dir); }
+
+static void save_ppm(const char *path, const uint8_t *px, int w, int h, int pitch) {
+    FILE *fo = fopen(path, "wb");
+    if (!fo) return;
+    fprintf(fo, "P6\n%d %d\n255\n", w, h);
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            const uint8_t *p = px + (size_t)y * (size_t)pitch + 4 * (size_t)x;
+            uint8_t rgb[3] = { p[2], p[1], p[0] };
+            fwrite(rgb, 1, 3, fo);
+        }
+    fclose(fo);
+}
+
+/* `cmd` is submitted with `src` read back and saved; returns a new one */
+static SDL_GPUCommandBuffer *snapshot(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *src, int w, int h, const char *path) {
+    SDL_GPUTransferBufferCreateInfo bi = { .usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, .size = (Uint32)(w * h * 4) };
+    SDL_GPUTransferBuffer *down = SDL_CreateGPUTransferBuffer(g_gpu, &bi);
+    if (!down) return cmd;
+    SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cmd);
+    SDL_GPUTextureRegion r = { .texture = src, .w = (Uint32)w, .h = (Uint32)h, .d = 1 };
+    SDL_GPUTextureTransferInfo t = { .transfer_buffer = down, .pixels_per_row = (Uint32)w, .rows_per_layer = (Uint32)h };
+    SDL_DownloadFromGPUTexture(cp, &r, &t);
+    SDL_EndGPUCopyPass(cp);
+    SDL_GPUFence *f = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
+    if (f) { SDL_WaitForGPUFences(g_gpu, true, &f, 1); SDL_ReleaseGPUFence(g_gpu, f); }
+    const uint8_t *px = SDL_MapGPUTransferBuffer(g_gpu, down, false);
+    if (px) save_ppm(path, px, w, h, w * 4), SDL_UnmapGPUTransferBuffer(g_gpu, down);
+    SDL_ReleaseGPUTransferBuffer(g_gpu, down);
+    return SDL_AcquireGPUCommandBuffer(g_gpu);
+}
+
 /* the time between two frames at the cap (0 = uncapped); smooth.c's grid */
 uint64_t joyride_screen_frame_ns(void) {
     int fps = cap_fps();
@@ -801,6 +837,15 @@ static void present(int flip) {
     }
     joyride_gbuf_done();
     map_pass(cmd, pic, pw, ph);
+    if (g_snap[0]) {                                     /* debug.c's report */
+        char path[4400];
+        snprintf(path, sizeof path, "%s/cpu.ppm", g_snap);
+        save_ppm(path, px, w, h, pitch);
+        snprintf(path, sizeof path, "%s/screen.ppm", g_snap);
+        g_snap[0] = 0;
+        if (bpp == 32 && !(cmd = snapshot(cmd, pic, pw, ph, path))) return;
+    }
+    joyride_debug_frame(2, 0, 0);                        /* debug.c's record: presented */
     if (!g_win) { headless_dump(cmd, pic, pw, ph); return; }
 
     SDL_GPUTexture *swap = NULL;
@@ -895,6 +940,10 @@ static void key_event(SDL_Scancode sc, int down, int repeat, SDL_Keymod mod) {
     }
     if (sc == SDL_SCANCODE_F1 || joyride_overlay_open()) {
         if (joyride_overlay_key((int)sc, down, repeat)) return;
+    }
+    if (sc == SDL_SCANCODE_F7 || sc == SDL_SCANCODE_F8) {   /* debugging (debug.c) */
+        if (down && !repeat) sc == SDL_SCANCODE_F7 ? joyride_debug_report() : joyride_debug_give();
+        return;
     }
     if (sc == SDL_SCANCODE_M) {                          /* the city map (map.c) */
         if (down && !repeat) joyride_map_toggle();

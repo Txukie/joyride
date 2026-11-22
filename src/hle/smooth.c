@@ -217,6 +217,9 @@ static int active(void) {
     return joyride_smooth && MEM8(0x502F34) && MEM32(0x775584) && MEM32(0x51323C) == 0;
 }
 
+static int g_extra_next;                    /* the frame begun is joyride's (for the record) */
+static uint64_t g_slot_next;
+
 static void begin(int32_t t, int shown) {
     static int trace = -1;
     if (trace < 0) trace = getenv("JOYRIDE_SMOOTH_TRACE") != NULL;
@@ -225,6 +228,7 @@ static void begin(int32_t t, int shown) {
     g_drawing = 1;
     g_sn = 0;
     camera_apply();
+    joyride_debug_frame(g_extra_next, t, g_extra_next ? g_slot_next : g_real_slot);   /* debug.c's record */
 }
 
 static void end(void) {
@@ -325,7 +329,9 @@ void joyride_smooth_wait(void) {
         if (log)
             fprintf(stderr, "[smooth]   now +%.1f -> slot +%.1f (t %.2f) due +%.1f\n", (double)(int64_t)(now - start) / 1e6,
                     rel / 1e6, t / 65536.0, (double)(int64_t)(due - start) / 1e6);
+        g_extra_next = 1, g_slot_next = at;
         begin(t, 1);
+        g_extra_next = 0;
         joyride_hw_begin();
         hud_save();
         hle_call_guest(0x430D40, 0, NULL);                 /* draw */

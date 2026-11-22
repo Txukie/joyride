@@ -36,7 +36,8 @@
  *   classic The game's tank controls on the pad: left stick steers and
  *           its up/down (or R2/L2) go forward/back, same buttons.
  * Start: the game's own pause (F6). Select: the city map. D-pad up and
- * down zoom the game in and out (display.c). L3+R3: the
+ * down zoom the game in and out (display.c); left writes a debug report,
+ * right gives all weapons and the next vehicle (debug.c). L3+R3: the
  * settings overlay (F1). Outside play (the game's menus, the overlay) the
  * pad works them as the keyboard does: joyride_pad_poll at the end.
  *
@@ -287,12 +288,21 @@ static void classic(const pad_t *p) {
  * this step; add the pad's changes to it. */
 static uint32_t g_play_ms;                 /* when the game last read the pad (in play) */
 
+static pad_t g_last_pad;
+void joyride_pad_state(float axes[6], uint32_t *buttons, float *share_f, float *share_b) {
+    axes[0] = g_last_pad.lx, axes[1] = g_last_pad.ly, axes[2] = g_last_pad.rx, axes[3] = g_last_pad.ry;
+    axes[4] = g_last_pad.lt, axes[5] = g_last_pad.rt;
+    *buttons = g_last_pad.buttons, *share_f = g_share_fwd, *share_b = g_share_back;
+}
+
 void joyride_pad_input(uint32_t word) {
     static uint32_t prev;
+    joyride_debug_step(word);                               /* debug.c's record */
     g_play_ms = SDL_GetTicks() ? (uint32_t)SDL_GetTicks() : 1;
     pad_t p;
     read_pad(&p);
     g_share_car = 0;                                        /* set again below while driving */
+    g_last_pad = p;
     if (!p.present) { prev = 0; return; }
     g_word = word;
     uint32_t rec = 0x74F160u + MEM32(0x74F83C) * 444u;
@@ -309,6 +319,9 @@ void joyride_pad_input(uint32_t word) {
     /* d-pad up / down: zoom the game in / out (display.c) */
     if (pressed & BTN(SDL_GAMEPAD_BUTTON_DPAD_UP)) joyride_camera_zoom(+1);
     if (pressed & BTN(SDL_GAMEPAD_BUTTON_DPAD_DOWN)) joyride_camera_zoom(-1);
+    /* d-pad left / right: debugging (debug.c): a report; all weapons and the next vehicle */
+    if (pressed & BTN(SDL_GAMEPAD_BUTTON_DPAD_LEFT)) joyride_debug_report();
+    if (pressed & BTN(SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) joyride_debug_give();
     prev = p.buttons;
 }
 
