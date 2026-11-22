@@ -214,9 +214,7 @@ void joyride_debug_report(void) {
 /* ---- all weapons, the next vehicle ------------------------------------------ */
 
 /* The models the style has, by number: 0x4BE178[model] is its entry in
- * the list at [0x501574] (count [0x501570]), -1 none. The tank (0x25) is
- * left out: it carries turret objects of its own (0x44CAD0), made when it
- * is set up and not undone by a model change. */
+ * the list at [0x501574] (count [0x501570]), -1 none. */
 static int model_info(int m) {
     int i = (int16_t)MEM16(0x4BE178u + 2u * (uint32_t)m);
     if (i < 0 || i >= (int)MEM32(0x501570)) return -1;
@@ -225,7 +223,7 @@ static int model_info(int m) {
 static int next_model(int cur) {
     for (int k = 1; k <= 64; k++) {
         int m = (cur + k) % 64;
-        if (m != 0x25 && m != cur && model_info(m) >= 0) return m;
+        if (m != cur && model_info(m) >= 0) return m;
     }
     return -1;
 }
@@ -237,7 +235,30 @@ static int next_model(int cur) {
  * 0x4067C0 does it: the dimensions and the info, the sprite, the body's
  * corners (0x434300), the driving's numbers for the model (0x460AD0). */
 static uint32_t f2u(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
+/* The tank's turret: two objects of the world (0x44CAD0), the base on the
+ * car (kind 1, type 0x21) and the gun on the base (type 0x22), their numbers
+ * in 0x11A and 0x11C, which other models use as flags. Made as 0x4067C0
+ * makes them for a tank; taken away (0x44EB90, the gun first) when the
+ * tank becomes something else. */
+static void tank_turret(uint32_t c, int was, int model) {
+    if (was == 0x25 && model != 0x25) {
+        uint32_t gun = (uint32_t)(int32_t)(int16_t)MEM16(c + 0x11C), base = (uint32_t)(int32_t)(int16_t)MEM16(c + 0x11A);
+        if ((int32_t)gun > 0) hle_call_guest(0x44EB90, 1, &gun);
+        if ((int32_t)base > 0) hle_call_guest(0x44EB90, 1, &base);
+        MEM16(c + 0x11A) = 0, MEM16(c + 0x11C) = 0, MEM16(c + 0x12C) = 0;
+    } else if (was != 0x25 && model == 0x25) {
+        uint32_t a[5] = { (uint32_t)(int32_t)(int16_t)MEM16(c), 1, 0, 0, 0x21 };
+        uint32_t base = hle_call_guest(0x44CAD0, 5, a);
+        MEM16(c + 0x11A) = (uint16_t)base;
+        if ((int32_t)base <= 0) return;                  /* no room in the world's objects */
+        uint32_t b[5] = { (uint32_t)(int32_t)(int16_t)base, 0, 0, 0x1E, 0x22 };
+        MEM16(c + 0x11C) = (uint16_t)hle_call_guest(0x44CAD0, 5, b);
+        hle_call_guest(0x44CAB0, 0, NULL);
+        MEM16(c + 0x12C) = 1;
+    }
+}
 static void swap_model(uint32_t c, int model) {
+    tank_turret(c, (int16_t)MEM16(c + 0x22), model);
     int idx = model_info(model);
     uint32_t info = MEM32(MEM32(0x501574) + 4u * (uint32_t)idx);
     int old_len = (int16_t)MEM16(c + 0x36);
