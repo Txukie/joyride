@@ -116,6 +116,9 @@ uint32_t joyride_view_scale(uint32_t view_h, uint32_t zoom, uint32_t scale) {
  * in around view `v`, made for a 4:3 view: as wide as the view really is
  * (its width and height at +8, +0xC). */
 uint32_t joyride_live_half_width(uint32_t half, uint32_t v) {
+    static int off = -1;
+    if (off < 0) off = getenv("JOYRIDE_NARROW_LIVE") != NULL;   /* tests: the game's own 4:3 area */
+    if (off) return half;
     int64_t w = (int32_t)MEM32(v + 8), h = (int32_t)MEM32(v + 0xC);
     if (h <= 0 || w * 3 <= h * 4) return half;
     return (uint32_t)((int64_t)(int32_t)half * w * 3 / (h * 4));
@@ -181,6 +184,8 @@ uint32_t joyride_pick_mode(uint32_t game) {
     }
     if (!g_sw) return game;
     int i = find(g_sw, g_sh);
+    if (i >= 0 && MEM32(entry_rec((uint32_t)i) + 12) < 32)
+        fprintf(stderr, "[joyride] %dx%d only in 16 bits: the GPU renderer and texture filter need 32\n", g_sw, g_sh);
     if (i < 0) {
         fprintf(stderr, "[joyride] screen size: no %dx%d mode on offer; keeping the game's own\n", g_sw, g_sh);
         g_sw = g_sh = 0;

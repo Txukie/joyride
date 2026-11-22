@@ -48,7 +48,7 @@ void joyride_hw_begin(void);
 int  joyride_hw_quads(const joyride_quad **q);   /* -1: not in use this frame */
 void joyride_hw_done(void);
 int  joyride_hw_active(void);                 /* this draw is the hardware renderer's */
-void joyride_hw_mark(int band, int x0, int x1);   /* the CPU drew there (bands of 64 rows) */
+void joyride_hw_mark(uint32_t surface, int band, int x0, int x1);   /* the CPU drew there (bands of 64 rows) */
 void joyride_gbuf_dims(int *pitch_px, int *rows);
 
 /* controllers (src/platform/pad.c) and the radio (mss.c) */

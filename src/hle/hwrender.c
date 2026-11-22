@@ -67,7 +67,8 @@ static int g_dirty_x0[MAXBANDS], g_dirty_x1[MAXBANDS];   /* x1 < x0: clean */
 static uint32_t g_last_base, g_last_pitch;
 static int g_last_h, g_was_drawing;
 
-void joyride_hw_mark(int band, int x0, int x1) {
+void joyride_hw_mark(uint32_t surface, int band, int x0, int x1) {
+    (void)surface;                                 /* the frame shown is a copy: the marks are the last draw's */
     if (band < 0 || band >= MAXBANDS) return;
     if (x0 < g_dirty_x0[band]) g_dirty_x0[band] = x0;
     if (x1 > g_dirty_x1[band]) g_dirty_x1[band] = x1;
@@ -86,13 +87,21 @@ void joyride_hw_begin(void) {
     uint32_t pitch, base = surface(&pitch);
     if (!w || !h || !base || pitch != (uint32_t)w * 4 || (h + BAND - 1) / BAND > MAXBANDS) { g_drawing = g_was_drawing = 0; return; }
     uint32_t *p = (uint32_t *)hle_ptr(base);
+    static uint32_t *keyrow;
+    static int keyw;
+    if (keyw < w) {
+        free(keyrow);
+        if (!(keyrow = malloc((size_t)w * 4))) { keyw = 0; g_drawing = g_was_drawing = 0; return; }
+        for (int i = 0; i < w; i++) keyrow[i] = JOYRIDE_KEY;
+        keyw = w;
+    }
     int full = !was || base != g_last_base || pitch != g_last_pitch || h != g_last_h;
     g_last_base = base, g_last_pitch = pitch, g_last_h = h;
     for (int b = 0; b * BAND < h; b++) {
         int x0 = full ? 0 : g_dirty_x0[b], x1 = full ? w - 1 : g_dirty_x1[b];
-        if (x1 >= x0)
+        if (x1 >= x0)                              /* copied from a row of key: memcpy is vectorised */
             for (int y = b * BAND; y < h && y < (b + 1) * BAND; y++)
-                for (uint32_t *q = p + (size_t)y * (size_t)w + x0, *e = q + (x1 - x0 + 1); q < e; q++) *q = JOYRIDE_KEY;
+                memcpy(p + (size_t)y * (size_t)w + x0, keyrow, (size_t)(x1 - x0 + 1) * 4);
         g_dirty_x0[b] = w, g_dirty_x1[b] = -1;
     }
 }

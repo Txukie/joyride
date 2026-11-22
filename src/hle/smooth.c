@@ -233,6 +233,11 @@ static void end(void) {
 }
 
 static uint64_t g_grid0, g_last_at, g_target, g_deadline, g_draw_ns = 8000000;
+
+/* what a frame of joyride's costs (its draw, and its flip less the wait
+ * for its slot), smoothed: for the debug log */
+static uint64_t g_frame_ns;
+static uint64_t period_now(void) { return joyride_screen_frame_ns(); }
 static uint64_t grid_ceil(uint64_t x, uint64_t period);
 
 /* Around the game's own draw (0x41499E): a new step. Its frame is usually
@@ -245,7 +250,7 @@ void joyride_smooth_begin(void) {
     g_real_shown = 0;
     if (!active()) return;
     int32_t t = 0;
-    uint64_t period = joyride_screen_frame_ns(), now = SDL_GetTicksNS();
+    uint64_t period = period_now(), now = SDL_GetTicksNS();
     if (period && g_on_now) {
         uint64_t earliest = now + g_draw_ns;
         if (g_last_at && earliest < g_last_at + period / 2) earliest = g_last_at + period / 2;
@@ -257,6 +262,9 @@ void joyride_smooth_begin(void) {
             g_real_shown = 1, g_real_slot = slot, g_last_at = slot;
             g_deadline = step_due() > 1000000 ? step_due() - 1000000 : step_due();
         }
+        if (getenv("JOYRIDE_SMOOTH_DEBUG") && !strcmp(getenv("JOYRIDE_SMOOTH_DEBUG"), "all"))
+            fprintf(stderr, "[smooth] step %u begins: real draw %s slot +%.1f\n", g_step, g_real_shown ? "serves" : "misses",
+                    ((double)(int64_t)slot - (double)(int64_t)(step_due() - STEP_NS)) / 1e6);
     }
     begin(t, g_real_shown);
 }
@@ -296,13 +304,13 @@ void joyride_smooth_wait(void) {
     if (!g_on_now) return;
 #define draw_ns g_draw_ns                   /* how long a draw takes, smoothed */
     uint64_t start = step_due() - STEP_NS;  /* when this step's time began */
-    uint64_t period = joyride_screen_frame_ns();
+    uint64_t period = period_now();
     static int dbg = -1;
-    if (dbg < 0) dbg = getenv("JOYRIDE_SMOOTH_DEBUG") != NULL;
-    int log = dbg && g_step % 50 == 0;
+    if (dbg < 0) dbg = !getenv("JOYRIDE_SMOOTH_DEBUG") ? 0 : !strcmp(getenv("JOYRIDE_SMOOTH_DEBUG"), "all") ? 2 : 1;
+    int log = dbg == 2 || (dbg && g_step % 50 == 0);
     if (log)
-        fprintf(stderr, "[smooth] step %u: safe point at +%.1f ms, draw %.1f ms, last step %d frames\n", g_step,
-                (double)(int64_t)(now - start) / 1e6, draw_ns / 1e6, g_extras_last);
+        fprintf(stderr, "[smooth] step %u: safe point at +%.1f ms, draw %.1f ms, frame %.1f ms, last step %d frames\n",
+                g_step, (double)(int64_t)(now - start) / 1e6, draw_ns / 1e6, g_frame_ns / 1e6, g_extras_last);
     for (;;) {
         if ((int32_t)MEM32(0x775580) >= 3) break;          /* the step is due */
         now = SDL_GetTicksNS();
@@ -326,8 +334,14 @@ void joyride_smooth_wait(void) {
         draw_ns = (draw_ns * 3 + (SDL_GetTicksNS() - now)) / 4;
         g_target = at, g_deadline = due > 1000000 ? due - 1000000 : due;
         g_extra = 1;
+        uint64_t f0 = SDL_GetTicksNS();
         hle_call_guest(0x414B10, 0, NULL);                 /* flip: the presenter waits for the slot */
         g_extra = 0;
+        {   /* the frame's cost: the draw, and the flip less its wait for the slot */
+            uint64_t f1 = SDL_GetTicksNS(), wait = at > f0 ? (at < f1 ? at - f0 : f1 - f0) : 0;
+            uint64_t cost = (f0 - now) + (f1 - f0 - wait);
+            g_frame_ns = g_frame_ns ? (g_frame_ns * 7 + cost) / 8 : cost;
+        }
         g_last_at = at;
         g_extras++;
         if (at >= due) break;                               /* drawn ahead: that was the last */

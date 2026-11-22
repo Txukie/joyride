@@ -674,28 +674,30 @@ uint64_t joyride_screen_frame_ns(void) {
 #define HW_BAND 64
 typedef struct { int x0, x1; } band_t;
 static int hw_scan(const uint8_t *px, int w, int h, int pitch, band_t *bands) {
-    const uint64_t key2 = (uint64_t)JOYRIDE_KEY << 32 | JOYRIDE_KEY;
+    static uint32_t *keyrow;                           /* a row of nothing but the key */
+    static int keyw;
+    if (keyw < w) {
+        free(keyrow);
+        keyrow = malloc((size_t)w * 4);
+        if (!keyrow) { keyw = 0; return 0; }
+        for (int i = 0; i < w; i++) keyrow[i] = JOYRIDE_KEY;
+        keyw = w;
+    }
+    uint32_t va = hle_va(px);
     int nb = (h + HW_BAND - 1) / HW_BAND;
     for (int b = 0; b < nb; b++) {
         int x0 = w, x1 = -1;
         for (int y = b * HW_BAND; y < h && y < (b + 1) * HW_BAND; y++) {
             const uint32_t *row = (const uint32_t *)(px + (size_t)y * (size_t)pitch);
+            if (!memcmp(row, keyrow, (size_t)w * 4)) continue;   /* most rows: nothing (vectorised) */
             int i = 0;
-            if (x0 > 0) {                                /* from the left, up to what is known */
-                while (i + 2 <= x0 && i + 2 <= w) {
-                    uint64_t v;
-                    memcpy(&v, row + i, 8);
-                    if (v != key2) break;
-                    i += 2;
-                }
-                while (i < w && i < x0 && row[i] == JOYRIDE_KEY) i++;
-                if (i < x0 && i < w) x0 = i;
-            }
+            while (i < x0 && row[i] == JOYRIDE_KEY) i++;
+            if (i < x0) x0 = i;
             int j = w - 1;
             while (j > x1 && row[j] == JOYRIDE_KEY) j--;
             if (j > x1) x1 = j;
         }
-        if (x1 >= x0) joyride_hw_mark(b, x0, x1);
+        if (x1 >= x0) joyride_hw_mark(va, b, x0, x1);
         if (bands) bands[b].x0 = x0, bands[b].x1 = x1;
     }
     return nb;
@@ -964,7 +966,13 @@ int hle_screen_desktop(int *w, int *h) {
     if (g_headless || !SDL_WasInit(SDL_INIT_VIDEO)) return 0;
     const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(g_win ? SDL_GetDisplayForWindow(g_win) : SDL_GetPrimaryDisplay());
     if (!dm) return 0;
-    *w = dm->w, *h = dm->h;
+    /* in pixels: with desktop scaling (Wayland's 150%, say) the mode is in
+     * scaled units, a size no screen has. Offered as one more mode, it also
+     * pushed the last of the list, 3840x2160 at 32 bits, past what the
+     * game's mode table holds, and the game played in 16 bits, where the GPU
+     * renderer and filter can't help. */
+    float d = dm->pixel_density > 0 ? dm->pixel_density : 1.0f;
+    *w = (int)lrintf((float)dm->w * d), *h = (int)lrintf((float)dm->h * d);
     return 1;
 }
 
