@@ -5,9 +5,10 @@
  * Left (F7): a report. joyride keeps the last 10 seconds of play in memory,
  * each game step (the player, the car, the camera, the controls) and each
  * frame drawn (its time, its place between steps, the camera it used), and
- * writes them to <data>/debug/<time>/report.txt, with the frame on screen
- * (screen.ppm: the GPU's picture; cpu.ppm: the game's surface) and the
- * game's memory (memory.bin, 0x4AB000..0x791000). The log line says where.
+ * writes them to <data>/debug/<time>/report.txt, with the next 10 frames
+ * on screen (screen_NN.png: the GPU's picture; cpu.png: the game's
+ * surface; frames.txt: when each was shown) and the game's memory
+ * (memory.bin, 0x4AB000..0x791000). The log line says where.
  *
  * Right (F8): all weapons (99 rounds each: player +0x13F + slot, slots
  * 1-4) and, in a vehicle, the next model in the style's list
@@ -155,7 +156,7 @@ void joyride_debug_report(void) {
     }
     fclose(f);
     save_memory(dir);
-    joyride_screen_snapshot(dir);                       /* the next frame: screen.ppm, cpu.ppm */
+    joyride_screen_snapshot(dir);                       /* the next frames: screen_NN.png, cpu.png */
     fprintf(stderr, "[debug] report written to %s\n", dir);
 }
 

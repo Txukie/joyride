@@ -663,26 +663,52 @@ static void headless_dump(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *src, int w,
     SDL_ReleaseGPUTransferBuffer(g_gpu, down);
 }
 
-/* debug.c's report: the next frame presented is saved in that directory,
- * as the GPU made it (screen.ppm) and as the game's surface (cpu.ppm) */
+/* debug.c's report: the next SNAP_FRAMES frames presented are kept, as the
+ * GPU made them (screen_NN.png), with the game's surface for the first
+ * (cpu.png); each is copied in memory as it goes by and a thread writes the
+ * PNGs after, so the frames keep coming at their pace. frames.txt says when
+ * each was presented (the report's FRAMES record has the same clock). */
+#define SNAP_FRAMES 10
 static char g_snap[4300];
-void joyride_screen_snapshot(const char *dir) { snprintf(g_snap, sizeof g_snap, "%s", dir); }
+static int g_snap_left, g_snap_n;
+static struct { uint8_t *px; int w, h, pitch; char path[4400]; } g_shots[SNAP_FRAMES + 1];
+static FILE *g_snap_log;
+static uint64_t g_snap_t0;
 
-static void save_ppm(const char *path, const uint8_t *px, int w, int h, int pitch) {
-    FILE *fo = fopen(path, "wb");
-    if (!fo) return;
-    fprintf(fo, "P6\n%d %d\n255\n", w, h);
-    for (int y = 0; y < h; y++)
-        for (int x = 0; x < w; x++) {
-            const uint8_t *p = px + (size_t)y * (size_t)pitch + 4 * (size_t)x;
-            uint8_t rgb[3] = { p[2], p[1], p[0] };
-            fwrite(rgb, 1, 3, fo);
-        }
-    fclose(fo);
+void joyride_screen_snapshot(const char *dir) {
+    if (g_snap_left) return;                               /* one at a time */
+    snprintf(g_snap, sizeof g_snap, "%s", dir);
+    char path[4400];
+    snprintf(path, sizeof path, "%s/frames.txt", dir);
+    g_snap_log = fopen(path, "w");
+    if (g_snap_log) fprintf(g_snap_log, "frame ms_after_press ns(SDL) kind\n");
+    g_snap_t0 = SDL_GetTicksNS();
+    g_snap_left = SNAP_FRAMES, g_snap_n = 0;
 }
 
-/* `cmd` is submitted with `src` read back and saved; returns a new one */
-static SDL_GPUCommandBuffer *snapshot(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *src, int w, int h, const char *path) {
+static int write_shots(void *arg) {
+    int n = (int)(intptr_t)arg;
+    for (int i = 0; i < n; i++) {
+        SDL_Surface *sf = SDL_CreateSurfaceFrom(g_shots[i].w, g_shots[i].h, SDL_PIXELFORMAT_XRGB8888, g_shots[i].px, g_shots[i].pitch);
+        if (sf) SDL_SavePNG(sf, g_shots[i].path), SDL_DestroySurface(sf);
+        free(g_shots[i].px), g_shots[i].px = NULL;
+    }
+    fprintf(stderr, "[debug] %d frames saved\n", n);
+    return 0;
+}
+
+static void keep_shot(const uint8_t *px, int w, int h, int pitch, const char *name) {
+    if (g_snap_n > SNAP_FRAMES) return;
+    uint8_t *copy = malloc((size_t)pitch * (size_t)h);
+    if (!copy) return;
+    memcpy(copy, px, (size_t)pitch * (size_t)h);
+    g_shots[g_snap_n].px = copy, g_shots[g_snap_n].w = w, g_shots[g_snap_n].h = h, g_shots[g_snap_n].pitch = pitch;
+    snprintf(g_shots[g_snap_n].path, sizeof g_shots[g_snap_n].path, "%s/%s", g_snap, name);
+    g_snap_n++;
+}
+
+/* `cmd` is submitted with `src` read back and kept; returns a new one */
+static SDL_GPUCommandBuffer *snapshot(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *src, int w, int h, const char *name) {
     SDL_GPUTransferBufferCreateInfo bi = { .usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, .size = (Uint32)(w * h * 4) };
     SDL_GPUTransferBuffer *down = SDL_CreateGPUTransferBuffer(g_gpu, &bi);
     if (!down) return cmd;
@@ -694,9 +720,28 @@ static SDL_GPUCommandBuffer *snapshot(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture 
     SDL_GPUFence *f = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
     if (f) { SDL_WaitForGPUFences(g_gpu, true, &f, 1); SDL_ReleaseGPUFence(g_gpu, f); }
     const uint8_t *px = SDL_MapGPUTransferBuffer(g_gpu, down, false);
-    if (px) save_ppm(path, px, w, h, w * 4), SDL_UnmapGPUTransferBuffer(g_gpu, down);
+    if (px) keep_shot(px, w, h, w * 4, name), SDL_UnmapGPUTransferBuffer(g_gpu, down);
     SDL_ReleaseGPUTransferBuffer(g_gpu, down);
     return SDL_AcquireGPUCommandBuffer(g_gpu);
+}
+
+/* in the presenter, once the frame is made: keep it while a capture runs */
+static SDL_GPUCommandBuffer *snap_frame(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *pic, int pw, int ph,
+                                        const uint8_t *px, int w, int h, int pitch, int bpp, int kind) {
+    if (!g_snap_left) return cmd;
+    int i = SNAP_FRAMES - g_snap_left;
+    char name[64];
+    if (i == 0 && bpp == 32) keep_shot(px, w, h, pitch, "cpu.png");
+    snprintf(name, sizeof name, "screen_%02d.png", i);
+    if (g_snap_log) fprintf(g_snap_log, "%d %.2f %llu %d\n", i, (SDL_GetTicksNS() - g_snap_t0) / 1e6,
+                            (unsigned long long)SDL_GetTicksNS(), kind);
+    if (bpp == 32) cmd = snapshot(cmd, pic, pw, ph, name);
+    if (--g_snap_left == 0) {
+        if (g_snap_log) fclose(g_snap_log), g_snap_log = NULL;
+        SDL_Thread *t = SDL_CreateThread(write_shots, "joyride-shots", (void *)(intptr_t)g_snap_n);
+        if (t) SDL_DetachThread(t);
+    }
+    return cmd;
 }
 
 /* the time between two frames at the cap (0 = uncapped); smooth.c's grid */
@@ -792,6 +837,14 @@ static void present(int flip) {
         if (joyride_hw_active() && bpp == 32) hw_scan(px, w, h, pitch, NULL);   /* what to clear next */
         return;
     }
+    /* With the GPU renderer, a frame is the world's quads over the CPU's
+     * layer, and a draw's quads are used once. A refresh that is not a flip
+     * (the window pump's, when 15 ms pass between flips: a step's update
+     * at 4K takes about that) has no quads, and showed the CPU layer alone:
+     * the HUD over black, a flash. The last frame stays on screen instead. */
+    static int last_was_gpu;
+    const joyride_quad *pending;
+    if (!flip && last_was_gpu && bpp == 32 && joyride_hw_quads(&pending) < 0 && !joyride_overlay_open()) return;
     uint32_t now = hle_ticks_ms();
     if (!flip && !g_force && seq == g_shown_seq && now - g_last_present < 250) return;
     if (!flip && !g_force && now - g_last_present < 15) return;
@@ -829,6 +882,7 @@ static void present(int flip) {
     if (bpp == 32) joyride_gbuf_size(pitch / 4, h);      /* texfilter.c and hwrender.c use this */
     const joyride_quad *quads;
     int nq = joyride_hw_quads(&quads);
+    last_was_gpu = nq >= 0 || (last_was_gpu && !flip);
     if (nq >= 0) {                                       /* the world was drawn by the GPU */
         if (hw_pass(cmd, quads, nq, w, h, &pw, &ph)) pic = g_world;
         joyride_hw_done();
@@ -839,14 +893,7 @@ static void present(int flip) {
     }
     joyride_gbuf_done();
     map_pass(cmd, pic, pw, ph);
-    if (g_snap[0]) {                                     /* debug.c's report */
-        char path[4400];
-        snprintf(path, sizeof path, "%s/cpu.ppm", g_snap);
-        save_ppm(path, px, w, h, pitch);
-        snprintf(path, sizeof path, "%s/screen.ppm", g_snap);
-        g_snap[0] = 0;
-        if (bpp == 32 && !(cmd = snapshot(cmd, pic, pw, ph, path))) return;
-    }
+    if (g_snap_left && !(cmd = snap_frame(cmd, pic, pw, ph, px, w, h, pitch, bpp, joyride_smooth_frame_kind()))) return;
     joyride_debug_frame(2, 0, 0);                        /* debug.c's record: presented */
     if (!g_win) { headless_dump(cmd, pic, pw, ph); return; }
 

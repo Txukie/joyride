@@ -210,6 +210,9 @@ static void camera_apply(void) {
 
 void joyride_smooth_offset(float *x, float *y) { *x = g_off_x, *y = g_off_y; }
 
+/* the frame being presented: 1 joyride's (between steps), 0 the game's own */
+int joyride_smooth_frame_kind(void) { return g_extra; }
+
 static void camera_restore(void) {
     g_off_x = g_off_y = 0;
     if (!g_chas) return;
