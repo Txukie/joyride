@@ -28,12 +28,12 @@
  *           stick points. X fire, A jump, Y enter/exit, B special, L1/R1
  *           previous/next weapon. Driving: left stick X steers (the game's
  *           analog steering), R2 accelerates, L2 brakes, X fire, A
- *           handbrake, Y exit, B special, L1/R1 radio station.
+ *           handbrake, Y exit, B special, L1/R1 radio station; in the
+ *           tank the right stick aims the turret (turret() below).
  *   classic The game's tank controls on the pad: left stick steers and
  *           its up/down (or R2/L2) go forward/back, same buttons.
  * Start: the game's Esc menu (it pauses the game). Select: the city map;
  * while it is open, d-pad up and down zoom it in and out.
- * The right stick does not aim turrets yet.
  *
  * Values are sent only when they change, so the keyboard keeps working
  * alongside the pad. JOYRIDE_PAD_SCRIPT="t:lx,ly,rx,ry,lt,rt,buttons;..."
@@ -201,18 +201,41 @@ static void on_foot_modern(const pad_t *p, uint32_t rec) {
     hold(C_NEXT, !!(p->buttons & BTN(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)));
 }
 
-static void driving_modern(const pad_t *p, uint32_t prev_buttons) {
-    steer((int)lrintf(dead(p->lx, 0.15f) * 7.0f));
+/* The tank's turret (car model 0x25; the only car with one in this
+ * exe): its angle is car +0xF0, relative to the car's heading (+0x268,
+ * same convention as a ped's). The game turns it 32 units a step while
+ * Special is held and the steering is pushed (0x40A418: left raises it),
+ * and does not steer the tank meanwhile. joyride aims it with the right
+ * stick through that same input, so the game's state is only changed by
+ * the game: while the turret is more than 16 units off where the stick
+ * points, it holds Special and steers towards it; then the left stick
+ * steers again. Returns 1 while it is turning the turret. */
+static int turret(const pad_t *p, uint32_t car) {
+    if (MEM16(car + 0x22) != 0x25 || hypotf(p->rx, p->ry) < 0.4f) return 0;
+    int target = (int)lrintf(atan2f(p->rx, p->ry) * 1024.0f / (2.0f * (float)M_PI));
+    int want = (target - (int)MEM16(car + 0x268)) & 0x3FF;
+    int diff = ((want - (int)(MEM16(car + 0xF0) & 0x3FF) + 512) & 0x3FF) - 512;
+    if (diff > -16 && diff < 16) return 0;
+    hold(C_SPECIAL, 1);
+    steer(diff > 0 ? -7 : 7);
+    return 1;
+}
+
+static void driving_modern(const pad_t *p, uint32_t prev_buttons, uint32_t rec) {
+    uint32_t car = 0x4BE248u + (MEM32(rec + 0xA8) & 0xFFFF) * 688u;
+    int aiming = turret(p, car);
+    if (!aiming) steer((int)lrintf(dead(p->lx, 0.15f) * 7.0f));
     int fwd = level(p->rt), back = level(p->lt);
     if (fwd && back) back = 0;                               /* both: accelerate wins */
     throttle(fwd, back);
     static int log = -1;
     if (log < 0) log = getenv("JOYRIDE_PAD_LOG") != NULL;
-    if (log) fprintf(stderr, "[pad] driving: steer %d fwd %d back %d\n", g_steer, g_fwd, g_back);
+    if (log) fprintf(stderr, "[pad] driving: steer %d fwd %d back %d model %d heading %d turret %d\n", g_steer, g_fwd,
+                     g_back, MEM16(car + 0x22), MEM16(car + 0x268), MEM16(car + 0xF0));
     hold(C_FIRE, !!(p->buttons & BTN(SDL_GAMEPAD_BUTTON_WEST)));
     hold(C_JUMP, !!(p->buttons & BTN(SDL_GAMEPAD_BUTTON_SOUTH)));     /* handbrake */
     hold(C_ENTER, !!(p->buttons & BTN(SDL_GAMEPAD_BUTTON_NORTH)));
-    hold(C_SPECIAL, !!(p->buttons & BTN(SDL_GAMEPAD_BUTTON_EAST)));
+    if (!aiming) hold(C_SPECIAL, !!(p->buttons & BTN(SDL_GAMEPAD_BUTTON_EAST)));
     hold(C_PREV, 0), hold(C_NEXT, 0);
     uint32_t pressed = p->buttons & ~prev_buttons;
     if (pressed & BTN(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) joyride_radio_step(-1);
@@ -243,7 +266,7 @@ void joyride_pad_input(uint32_t word) {
     int on_foot = MEM32(rec + 0xA4) == 2;
     if (!joyride_controls_modern) classic(&p);
     else if (on_foot) on_foot_modern(&p, rec);
-    else driving_modern(&p, prev);
+    else driving_modern(&p, prev, rec);
     /* Start: the game's Esc menu (pauses), through the keyboard's path */
     uint32_t pressed = p.buttons & ~prev, released = prev & ~p.buttons;
     if (pressed & BTN(SDL_GAMEPAD_BUTTON_START)) joyride_screen_key(SDL_SCANCODE_ESCAPE, 1);

@@ -114,8 +114,9 @@ you aim doesn't move.
 | | |
 | --- | --- |
 | Left stick | steer (the game's own analog steering, 7 steps each way) |
+| Right stick | aim the tank's turret where the stick points |
 | R2 / L2 | accelerate / brake and reverse (4 levels each) |
-| X | shoot (tank, fire engine) |
+| X | shoot (tank) |
 | A | handbrake |
 | Y | exit vehicle |
 | B | special |
@@ -133,8 +134,14 @@ games stay in step. The radio stations are the game's ten music tracks;
 L1/R1 move the car's music to the next or previous one without stopping,
 and the next car you get into plays its own station again.
 
-Not yet: aiming the tank's and fire engine's turret with the right stick,
-and navigating the F12 menu with the controller.
+The tank is the only vehicle with a turret in this version of the game:
+the fire engine has none to aim. The game itself turns a turret only while
+Special is held with the steering pushed, and it doesn't steer the tank
+meanwhile, so joyride does the same: while the turret turns towards the
+right stick (about a third of a second for a quarter turn) the left stick
+doesn't steer; once it's on target, it does again.
+
+Not yet: navigating the F12 menu with the controller.
 
 ### City map (Select, or M)
 
