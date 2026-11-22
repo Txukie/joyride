@@ -671,7 +671,8 @@ static void headless_dump(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *src, int w,
 #define SNAP_FRAMES 10
 static char g_snap[4300];
 static int g_snap_left, g_snap_n;
-static struct { uint8_t *px; int w, h, pitch; char path[4400]; } g_shots[SNAP_FRAMES + 1];
+typedef struct { uint8_t *px; int w, h, pitch; char path[4400]; } shot_t;
+static shot_t g_shots[SNAP_FRAMES + 1];
 static FILE *g_snap_log;
 static uint64_t g_snap_t0;
 
@@ -686,14 +687,18 @@ void joyride_screen_snapshot(const char *dir) {
     g_snap_left = SNAP_FRAMES, g_snap_n = 0;
 }
 
+/* the writer has its own copy of the list: a report asked for while it
+ * still writes the last one's (seconds at 4K) starts a list of its own */
+typedef struct { int n; shot_t s[SNAP_FRAMES + 1]; } shots_t;
 static int write_shots(void *arg) {
-    int n = (int)(intptr_t)arg;
-    for (int i = 0; i < n; i++) {
-        SDL_Surface *sf = SDL_CreateSurfaceFrom(g_shots[i].w, g_shots[i].h, SDL_PIXELFORMAT_XRGB8888, g_shots[i].px, g_shots[i].pitch);
-        if (sf) SDL_SavePNG(sf, g_shots[i].path), SDL_DestroySurface(sf);
-        free(g_shots[i].px), g_shots[i].px = NULL;
+    shots_t *l = arg;
+    for (int i = 0; i < l->n; i++) {
+        SDL_Surface *sf = SDL_CreateSurfaceFrom(l->s[i].w, l->s[i].h, SDL_PIXELFORMAT_XRGB8888, l->s[i].px, l->s[i].pitch);
+        if (sf) SDL_SavePNG(sf, l->s[i].path), SDL_DestroySurface(sf);
+        free(l->s[i].px);
     }
-    fprintf(stderr, "[debug] %d frames saved\n", n);
+    fprintf(stderr, "[debug] %d frames saved\n", l->n);
+    free(l);
     return 0;
 }
 
@@ -738,8 +743,15 @@ static SDL_GPUCommandBuffer *snap_frame(SDL_GPUCommandBuffer *cmd, SDL_GPUTextur
     if (bpp == 32) cmd = snapshot(cmd, pic, pw, ph, name);
     if (--g_snap_left == 0) {
         if (g_snap_log) fclose(g_snap_log), g_snap_log = NULL;
-        SDL_Thread *t = SDL_CreateThread(write_shots, "joyride-shots", (void *)(intptr_t)g_snap_n);
-        if (t) SDL_DetachThread(t);
+        shots_t *l = malloc(sizeof *l);
+        if (l) {
+            l->n = g_snap_n;
+            memcpy(l->s, g_shots, sizeof g_shots);
+            SDL_Thread *t = SDL_CreateThread(write_shots, "joyride-shots", l);
+            if (t) SDL_DetachThread(t);
+            else write_shots(l);
+        } else for (int k = 0; k < g_snap_n; k++) free(g_shots[k].px);
+        g_snap_n = 0;
     }
     return cmd;
 }

@@ -163,6 +163,18 @@ texture files the first time it runs (a few seconds, in the background) and
 keeps them in `~/.local/share/joyride/maps/`; delete them to rebuild.
 See [`src/platform/map.c`](src/platform/map.c).
 
+### Debugging (d-pad left / right, F7 / F8)
+
+D-pad left (F7) writes a report to `~/.local/share/joyride/debug/<time>/`
+for a bug report: `report.txt` (the settings, and the last ten seconds of
+play step by step and frame by frame: player, car, camera, controls,
+frame times), the next ten frames on screen (`screen_00.png` to
+`screen_09.png`, written in the background over a few seconds), the
+game's own surface (`cpu.png`) and its memory (`memory.bin`). D-pad right
+(F8) gives every weapon with 99 rounds and, in a vehicle, turns it into
+the next model the city has (all but the tank). See
+[`src/platform/debug.c`](src/platform/debug.c).
+
 ### Keys
 
 | Key | |
@@ -171,6 +183,8 @@ See [`src/platform/map.c`](src/platform/map.c).
 | M | city map |
 | + / - | zoom the game in / out |
 | F6 | pause (the game's own) |
+| F7 | debug report (as d-pad left) |
+| F8 | all weapons, next vehicle (as d-pad right) |
 | F11, Alt+Enter | fullscreen |
 | Esc, then Enter | quit (the game's own menu); closing the window twice also quits |
 

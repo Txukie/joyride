@@ -11,9 +11,7 @@
  * (memory.bin, 0x4AB000..0x791000). The log line says where.
  *
  * Right (F8): all weapons (99 rounds each: player +0x13F + slot, slots
- * 1-4) and, in a vehicle, the next model in the style's list
- * ([0x501574][i] + 0x6B): the car is set up again in place by the game's own
- * 0x4067C0 (x, y, z, heading, model, slot), its driver and state put back.
+ * 1-4) and, in a vehicle, the next model the style has (swap_model).
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -122,6 +120,9 @@ void joyride_debug_report(void) {
             c->res_w, c->res_h, sw, sh, MEM32(0x504CB8), c->filter, joyride_texfilter, c->scaling, c->fullscreen, c->smooth,
             c->hwrender ? "gpu" : "software", c->controls_modern ? "modern" : "classic");
     fprintf(f, "frame period %.3f ms (cap), hw renderer active %d\n", joyride_screen_frame_ns() / 1e6, joyride_hw_active());
+    int gp, gq, gr, gm;
+    joyride_gbuf_stats(&gp, &gq, &gr, &gm);
+    fprintf(f, "texture slots: pages %d, palettes %d; started over %d times (%d mid-frame)\n", gp, gq, gr, gm);
     uint32_t r = rec();
     fprintf(f, "player %u: state %u id %u; weapons", MEM32(0x74F83C), MEM32(r + 0xA4), MEM32(r + 0xA8) & 0xFFFF);
     for (int w = 0; w < 5; w++) fprintf(f, " %u", MEM8(r + 0x13F + w));
@@ -162,33 +163,63 @@ void joyride_debug_report(void) {
 
 /* ---- all weapons, the next vehicle ------------------------------------------ */
 
+/* The models the style has, by number: 0x4BE178[model] is its entry in
+ * the list at [0x501574] (count [0x501570]), -1 none. The tank (0x25) is
+ * left out: it carries turret objects of its own (0x44CAD0), made when it
+ * is set up and not undone by a model change. */
+static int model_info(int m) {
+    int i = (int16_t)MEM16(0x4BE178u + 2u * (uint32_t)m);
+    if (i < 0 || i >= (int)MEM32(0x501570)) return -1;
+    return MEM8(MEM32(MEM32(0x501574) + 4u * (uint32_t)i) + 0x6B) == m ? i : -1;   /* the info names its model */
+}
+static int next_model(int cur) {
+    for (int k = 1; k <= 64; k++) {
+        int m = (cur + k) % 64;
+        if (m != 0x25 && m != cur && model_info(m) >= 0) return m;
+    }
+    return -1;
+}
+
+/* The car set up again as `model` where it is. The game's own set-up
+ * (0x4067C0) can't be used on a car in play: it also puts the car in the
+ * world's object lists (0x436C30), and a second time links it into itself
+ * (the game hung). So only what depends on the model is done again, as
+ * 0x4067C0 does it: the dimensions and the info, the sprite, the body's
+ * corners (0x434300). */
+static void swap_model(uint32_t c, int model) {
+    int idx = model_info(model);
+    uint32_t info = MEM32(MEM32(0x501574) + 4u * (uint32_t)idx);
+    MEM32(c + 0x2AC) = info;
+    MEM16(c + 0x20) = MEM16(info + 0xE), MEM16(c + 0x32) = MEM16(info + 0x10);
+    MEM16(c + 0x28) = model == 4 ? 0x3C : MEM16(info + 0xA);
+    MEM16(c + 0x2A) = MEM16(info + 0xC), MEM16(c + 0xF8) = MEM16(info + 6);
+    MEM16(c + 0x24) = MEM16(info + 0xAE), MEM16(c + 0x26) = MEM16(info + 0xB0);
+    MEM16(c + 0x34) = MEM8(info + 0x6A), MEM16(c + 0x36) = (uint16_t)-(int16_t)MEM16(info + 2);
+    MEM16(c + 0x2C) = MEM16(info), MEM16(c + 0x30) = MEM16(info + 4);
+    MEM16(c + 0x8C) = (uint16_t)((int16_t)MEM16(info + 2) >> 1), MEM16(c + 0x8A) = (uint16_t)((int16_t)MEM16(info) >> 1);
+    /* the sprite (0x47C9F0's part that depends on the model, 0x47C9D0) */
+    uint32_t o = c + 0x250, look = MEM16(info + 6);
+    MEM16(o + 0x16) = (uint16_t)look, MEM32(o + 0x48) = MEM32(0x773E38u + 4u * look), MEM32(o + 0x1C) = 0;
+    MEM16(o + 0x12) = (uint16_t)((uint32_t)idx * 12u + MEM32(0x77530C));
+    MEM16(c + 0x22) = (uint16_t)model;
+    MEM32(c + 0x108) = model == 0x2F ? 0x20000 : model == 0x25 ? 0x40000 : 0x30000;
+    MEM16(c + 0xEE) = model == 0x13 ? 1 : model == 1 ? 2 : model == 0x2B ? 3 : 0;
+    MEM16(c + 0xCE) = (uint16_t)((MEM8(c + 0x28) & 7) - 4);
+    /* the body's corners, from the new size */
+    uint32_t a[8] = { MEM32(c + 0x250), MEM32(c + 0x254), MEM32(c + 0x258), MEM16(c + 0x8A), MEM16(c + 0x8C),
+                      MEM16(c + 0x268), MEM16(c + 0x30), c + 0x1DC };
+    for (int i = 3; i < 7; i++) a[i] = (uint32_t)(int32_t)(int16_t)a[i];
+    hle_call_guest(0x434300, 8, a);
+}
+
 void joyride_debug_give(void) {
     uint32_t r = rec();
     for (int w = 1; w <= 4; w++) MEM8(r + 0x13F + w) = 99;
     fprintf(stderr, "[debug] all weapons\n");
     if (MEM32(r + 0xA4) == 2) return;                    /* on foot: weapons only */
-    /* NOT WORKING YET: the game hangs a few steps after the car is set up
-     * again in place; kept behind JOYRIDE_DEBUG_SWAP=1 until it's found */
-    if (!getenv("JOYRIDE_DEBUG_SWAP")) { fprintf(stderr, "[debug] vehicle swap is off (JOYRIDE_DEBUG_SWAP=1)\n"); return; }
-
     uint32_t id = MEM32(r + 0xA8) & 0xFFFF, c = 0x4BE248u + id * 688u;
-    int cur = (int16_t)MEM16(c + 0x22), n = (int)MEM32(0x501570), next = -1, first = -1;
-    uint32_t infos = MEM32(0x501574);
-    for (int i = 0; i < n && i < 100; i++) {            /* the models the style has, in order */
-        int m = MEM8(MEM32(infos + 4u * (uint32_t)i) + 0x6B);
-        if (first < 0 || m < first) first = m;
-        if (m > cur && (next < 0 || m < next)) next = m;
-    }
-    if (next < 0) next = first;
-    if (next < 0) return;
-    static uint8_t keep[688];
-    memcpy(keep, hle_ptr(c), sizeof keep);
-    uint32_t a[6] = { MEM32(c + 0x250), MEM32(c + 0x254), MEM32(c + 0x258), MEM16(c + 0x268), (uint32_t)next, id };
-    hle_call_guest(0x4067C0, 6, a);
-    /* the driver and what the game keeps of it */
-    static const int k_fields[][2] = { { 0x02, 2 }, { 0x04, 2 }, { 0x06, 2 }, { 0x88, 2 }, { 0x9C, 4 }, { 0xB8, 2 },
-                                       { 0x110, 2 }, { 0x13C, 2 }, { 0x244, 4 } };
-    for (size_t i = 0; i < sizeof k_fields / sizeof *k_fields; i++)
-        memcpy((uint8_t *)hle_ptr(c) + k_fields[i][0], keep + k_fields[i][0], (size_t)k_fields[i][1]);
+    int cur = (int16_t)MEM16(c + 0x22), next = next_model(cur);
+    if (next < 0 || next == cur) return;
+    swap_model(c, next);
     fprintf(stderr, "[debug] vehicle %u: model %d -> %d\n", id, cur, next);
 }

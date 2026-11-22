@@ -149,8 +149,12 @@ static int g_gw, g_gh;              /* pixels a row (pitch / 4), rows */
  *      transparent << 17 | tile << 18 | check << 19 (low 13 of 17)
  * The 17-bit check of the colour written lets a pixel drawn over later (or
  * left from an earlier frame) be told apart, so nothing is cleared. */
-#define MAXPAGES 128
-#define MAXPALS 1024
+/* the filter's record packs page and palette slots in 7 and 10 bits; the
+ * GPU renderer's quads carry them whole, so it can use what the GPU
+ * textures hold (256 pages, 4096 palette rows; the palette table below is
+ * kept at half full) */
+#define MAXPAGES (joyride_hwrender ? 255 : 128)
+#define MAXPALS (joyride_hwrender ? 2048 : 1024)
 
 /* texture pages (64 KB, 256x256 texels) by guest address >> 16 -> slot 1..127 */
 static uint8_t g_page_slot[65536];
@@ -170,7 +174,7 @@ static int g_npals;
 static uint8_t *g_frozen[256];
 static uint8_t g_free[256];
 static int g_nfree;
-static int g_resets;
+static int g_resets, g_resets_mid;   /* all, and those mid-frame */
 static void reset_slots(void) {
     g_resets++;
     g_last_pal = g_last_page = ~0u;
@@ -188,9 +192,14 @@ static void reset_slots(void) {
  * a new slot for what comes after. Frozen slots are uploaded from the copy
  * at the next frame and then freed. */
 
+/* Running out mid-frame means starting over mid-frame, and what was drawn
+ * before it then points at slots holding other textures (the garbage seen
+ * zoomed out, with more of the city on screen). So the slots start over
+ * between frames, once three quarters are taken (joyride_gbuf_done); the
+ * reset here is only for a frame that needs more than that. */
 static int new_slot(void) {
     if (g_nfree) return g_free[--g_nfree];
-    if (g_npages >= MAXPAGES) reset_slots();
+    if (g_npages >= MAXPAGES) g_resets_mid++, reset_slots();
     return g_npages++;
 }
 
@@ -241,7 +250,7 @@ static int pal_slot(uint32_t pal) {
                 return s;
             }
         }
-        reset_slots();                                       /* full: start over */
+        g_resets_mid++, reset_slots();                       /* full: start over */
     }
 }
 
@@ -318,6 +327,11 @@ void joyride_gbuf_done(void) {
     if (getenv("JOYRIDE_GBUF_DEBUG") && n++ % 50 == 0)
         fprintf(stderr, "[gbuf] pages %d, palettes %d, resets %d\n", g_npages - 1, g_npals, g_resets);
     g_gb_used = 0;                                            /* (stale entries fail their check) */
+    if (g_npages - g_nfree > MAXPAGES * 3 / 4 || g_npals > MAXPALS * 3 / 4) reset_slots();
+}
+
+void joyride_gbuf_stats(int *pages, int *pals, int *resets, int *mid) {
+    *pages = g_npages - 1 - g_nfree, *pals = g_npals, *resets = g_resets, *mid = g_resets_mid;
 }
 
 /* everything uploaded is gone (the GPU textures were remade) */
