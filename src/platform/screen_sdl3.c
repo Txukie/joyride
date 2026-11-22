@@ -808,8 +808,8 @@ static int hw_scan(const uint8_t *px, int w, int h, int pitch, band_t *bands) {
  * by whole times (pixels stay sharp), piece by piece: the layer's pieces
  * (what is drawn, with gaps of up to 16 pixels closed) found on a grid of
  * 8 x 8 cells; a piece near an edge of the screen stays on that edge (the
- * score in its corner), one away from the edges grows about its middle
- * (WASTED!, the mission text). */
+ * score in its corner), one away from the edges keeps its place from the
+ * middle of the screen, scaled (WASTED!, the mission text's lines). */
 int joyride_screen_hud_scale(int h) {
     if (joyride_cfg.hud > 0) return joyride_cfg.hud;
     int k = (h + 360) / 720;                          /* 4K: 3, 1440p and 1080p: 2 */
@@ -864,13 +864,14 @@ static int hud_boxes(const uint8_t *px, int w, int h, int pitch, const band_t *b
         while (kk > 1 && (o->w * kk > w || o->h * kk > h)) kk--;
         o->k = kk;
         int dw = o->w * kk, dh = o->h * kk;
-        /* on an edge it is near (within 15% of the screen), else about its middle */
-        if (o->x < w * 15 / 100) o->dx = o->x * kk;
-        else if (o->x + o->w > w * 85 / 100) o->dx = w - (w - o->x) * kk;
-        else o->dx = o->x + o->w / 2 - dw / 2;
-        if (o->y < h * 15 / 100) o->dy = o->y * kk;
-        else if (o->y + o->h > h * 85 / 100) o->dy = h - (h - o->y) * kk;
-        else o->dy = o->y + o->h / 2 - dh / 2;
+        /* each piece's place is scaled about a point of the screen: the edge
+         * it is near (within 15% of the screen), else the middle, so the
+         * pieces around one point keep their layout, only larger (two
+         * lines of text keep their gap, the heads stay above the bar) */
+        int ax = o->x < w * 15 / 100 ? 0 : o->x + o->w > w * 85 / 100 ? w : w / 2;
+        int ay = o->y < h * 15 / 100 ? 0 : o->y + o->h > h * 85 / 100 ? h : h / 2;
+        o->dx = ax + (o->x - ax) * kk;
+        o->dy = ay + (o->y - ay) * kk;
         if (o->dx < 0) o->dx = 0;
         if (o->dx + dw > w) o->dx = w - dw;
         if (o->dy < 0) o->dy = 0;
