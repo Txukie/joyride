@@ -292,9 +292,13 @@ static const uint32_t k_hw_fs[] =
 static const uint32_t k_comp_fs[] =
 #include "composite.frag.h"
 ;
+static const uint32_t k_map_fs[] =
+#include "map.frag.h"
+;
 #endif
 
-static SDL_GPUGraphicsPipeline *g_fpipe, *g_hwpipe, *g_comppipe;
+static SDL_GPUGraphicsPipeline *g_fpipe, *g_hwpipe, *g_comppipe, *g_mappipe;
+static SDL_GPUSampler *g_linear;
 static SDL_GPUSampler *g_near;
 static SDL_GPUTexture *g_gtex, *g_pages, *g_pals, *g_filt;
 static int g_gtw, g_gth, g_fw, g_fh;
@@ -336,7 +340,11 @@ static int filter_init(void) {
     SDL_GPUShaderCreateInfo cf = { .code_size = sizeof k_comp_fs, .code = (const Uint8 *)k_comp_fs, .entrypoint = "main",
                                    .format = SDL_GPU_SHADERFORMAT_SPIRV, .stage = SDL_GPU_SHADERSTAGE_FRAGMENT,
                                    .num_samplers = 1, .num_uniform_buffers = 1 };
+    SDL_GPUShaderCreateInfo mf = { .code_size = sizeof k_map_fs, .code = (const Uint8 *)k_map_fs, .entrypoint = "main",
+                                   .format = SDL_GPU_SHADERFORMAT_SPIRV, .stage = SDL_GPU_SHADERSTAGE_FRAGMENT,
+                                   .num_samplers = 1, .num_uniform_buffers = 1 };
     SDL_GPUShader *hvs = SDL_CreateGPUShader(g_gpu, &hv), *hfs = SDL_CreateGPUShader(g_gpu, &hf), *cfs = SDL_CreateGPUShader(g_gpu, &cf);
+    SDL_GPUShader *mfs = SDL_CreateGPUShader(g_gpu, &mf);
     if (hvs && hfs && cfs && vs) {
         SDL_GPUColorTargetDescription blend = {
             .format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
@@ -359,7 +367,15 @@ static int filter_init(void) {
             .target_info = { .color_target_descriptions = &plain, .num_color_targets = 1 },
         };
         g_comppipe = SDL_CreateGPUGraphicsPipeline(g_gpu, &pc);
+        if (mfs) {                                       /* the city map: blended over the picture */
+            SDL_GPUGraphicsPipelineCreateInfo pm = {
+                .vertex_shader = vs, .fragment_shader = mfs, .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
+                .target_info = { .color_target_descriptions = &blend, .num_color_targets = 1 },
+            };
+            g_mappipe = SDL_CreateGPUGraphicsPipeline(g_gpu, &pm);
+        }
     }
+    if (mfs) SDL_ReleaseGPUShader(g_gpu, mfs);
     if (vs) SDL_ReleaseGPUShader(g_gpu, vs);
     if (hvs) SDL_ReleaseGPUShader(g_gpu, hvs);
     if (hfs) SDL_ReleaseGPUShader(g_gpu, hfs);
@@ -371,6 +387,8 @@ static int filter_init(void) {
                                     .address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
                                     .address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE };
     g_near = SDL_CreateGPUSampler(g_gpu, &si);
+    si.min_filter = si.mag_filter = SDL_GPU_FILTER_LINEAR;
+    g_linear = SDL_CreateGPUSampler(g_gpu, &si);
     SDL_GPUTextureCreateInfo pg = { .type = SDL_GPU_TEXTURETYPE_2D_ARRAY, .format = SDL_GPU_TEXTUREFORMAT_R8_UINT,
                                     .usage = SDL_GPU_TEXTUREUSAGE_SAMPLER, .width = 256, .height = 256,
                                     .layer_count_or_depth = 256, .num_levels = 1 };
@@ -561,6 +579,54 @@ static int hw_pass(SDL_GPUCommandBuffer *cmd, const joyride_quad *quads, int n, 
     return 1;
 }
 
+/* ---- the city map (src/platform/map.c) ------------------------------------ */
+
+static SDL_GPUTexture *g_maptex;
+static int g_map_id = -1;
+
+/* Over the picture `pic` (pw x ph), when the map is open. */
+static void map_pass(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *pic, int pw, int ph) {
+    if (!joyride_map_open() || !filter_init() || !g_mappipe || !g_linear) return;
+    int size, id;
+    const uint8_t *m = joyride_map_picture(&size, &id);
+    if (!m) return;
+    if (!g_maptex || id != g_map_id) {                   /* a city's picture goes up once */
+        if (g_maptex) SDL_ReleaseGPUTexture(g_gpu, g_maptex);
+        g_maptex = make_tex(size, size, SDL_GPU_TEXTUREUSAGE_SAMPLER);
+        SDL_GPUTransferBufferCreateInfo bi = { .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, .size = (Uint32)(size * size * 4) };
+        SDL_GPUTransferBuffer *up = g_maptex ? SDL_CreateGPUTransferBuffer(g_gpu, &bi) : NULL;
+        void *map = up ? SDL_MapGPUTransferBuffer(g_gpu, up, false) : NULL;
+        if (!map) { if (up) SDL_ReleaseGPUTransferBuffer(g_gpu, up); return; }
+        memcpy(map, m, (size_t)size * size * 4);
+        SDL_UnmapGPUTransferBuffer(g_gpu, up);
+        SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cmd);
+        SDL_GPUTextureTransferInfo src = { .transfer_buffer = up, .pixels_per_row = (Uint32)size, .rows_per_layer = (Uint32)size };
+        SDL_GPUTextureRegion dst = { .texture = g_maptex, .w = (Uint32)size, .h = (Uint32)size, .d = 1 };
+        SDL_UploadToGPUTexture(cp, &src, &dst, false);
+        SDL_EndGPUCopyPass(cp);
+        SDL_ReleaseGPUTransferBuffer(g_gpu, up);
+        g_map_id = id;
+    }
+    struct { float rect[4], player[4], obj[8][4], count[4]; } u = { 0 };
+    float side = (float)(pw < ph ? pw : ph) * 0.96f;
+    u.rect[0] = ((float)pw - side) / 2, u.rect[1] = ((float)ph - side) / 2, u.rect[2] = side;
+    u.rect[3] = side / 160.0f < 3.0f ? 3.0f : side / 160.0f;
+    float pl[2], ob[8][2];
+    int n = joyride_map_dots(pl, ob, 8);
+    u.player[0] = pl[0], u.player[1] = pl[1], u.player[2] = 1;
+    for (int i = 0; i < n; i++) u.obj[i][0] = ob[i][0], u.obj[i][1] = ob[i][1];
+    u.count[0] = (float)n;
+    SDL_GPUColorTargetInfo ct = { .texture = pic, .load_op = SDL_GPU_LOADOP_LOAD, .store_op = SDL_GPU_STOREOP_STORE };
+    SDL_GPURenderPass *rp = SDL_BeginGPURenderPass(cmd, &ct, 1, NULL);
+    if (!rp) return;
+    SDL_BindGPUGraphicsPipeline(rp, g_mappipe);
+    SDL_GPUTextureSamplerBinding b = { g_maptex, g_linear };
+    SDL_BindGPUFragmentSamplers(rp, 0, &b, 1);
+    SDL_PushGPUFragmentUniformData(cmd, 0, &u, sizeof u);
+    SDL_DrawGPUPrimitives(rp, 3, 1, 0, 0);
+    SDL_EndGPURenderPass(rp);
+}
+
 /* JOYRIDE_HEADLESS_GPU=1 with JOYRIDE_GPU_DUMP=<dir>: no window, but the GPU
  * filters, and the result is read back and saved, once a second (tests). */
 static void headless_dump(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *src, int w, int h) {
@@ -731,6 +797,7 @@ static void present(int flip) {
         if (joyride_gbuf_frame(&gb, &gw, &gh) && gw >= w && gh >= h && filter_pass(cmd, gb, gw, gh, w, h)) pic = g_filt;
     }
     joyride_gbuf_done();
+    map_pass(cmd, pic, pw, ph);
     if (!g_win) { headless_dump(cmd, pic, pw, ph); return; }
 
     SDL_GPUTexture *swap = NULL;
@@ -825,6 +892,10 @@ static void key_event(SDL_Scancode sc, int down, int repeat, SDL_Keymod mod) {
     }
     if (sc == SDL_SCANCODE_F12 || joyride_overlay_open()) {
         if (joyride_overlay_key((int)sc, down, repeat)) return;
+    }
+    if (sc == SDL_SCANCODE_M) {                          /* the city map (map.c) */
+        if (down && !repeat) joyride_map_toggle();
+        return;
     }
     int vk = vk_of(sc);
     if (vk) hle_input_key(down, (uint32_t)vk, scan_of(sc));

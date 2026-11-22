@@ -121,8 +121,8 @@ you aim doesn't move.
 | B | special |
 | L1 / R1 | previous / next radio station |
 
-**Both:** Start opens the game's Esc menu, which pauses it; Select is
-reserved for a map.
+**Both:** Start opens the game's Esc menu, which pauses it; Select shows
+the city map.
 
 **Classic** puts the game's own tank controls on the pad: left stick steers,
 up/down or R2/L2 go forward and back, same buttons.
@@ -134,13 +134,25 @@ L1/R1 move the car's music to the next or previous one without stopping,
 and the next car you get into plays its own station again.
 
 Not yet: aiming the tank's and fire engine's turret with the right stick,
-the map, and navigating the F12 menu with the controller.
+and navigating the F12 menu with the controller.
+
+### City map (Select, or M)
+
+Select on the controller, or M on the keyboard, shows a map of the whole
+city over the game at 70% (press again to hide it): you as a bright blue
+dot, the current objectives (the game's arrow targets: a place, a car or a
+person, and the red arrow's) as bright red dots. GTA has no map picture, so
+joyride draws one for each of the three cities from the game's own map and
+texture files the first time it runs (a few seconds, in the background) and
+keeps them in `~/.local/share/joyride/maps/`; delete them to rebuild.
+See [`src/platform/map.c`](src/platform/map.c).
 
 ### Keys
 
 | Key | |
 | --- | --- |
-| F12 | settings: screen size, renderer, textures, motion, scaling, fullscreen |
+| F12 | settings: screen size, renderer, textures, motion, controller, scaling, fullscreen |
+| M | city map |
 | F11, Alt+Enter | fullscreen |
 | Esc, then Enter | quit (the game's own menu); closing the window twice also quits |
 

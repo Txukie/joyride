@@ -75,7 +75,7 @@ find_program(GLSLC glslc)
 if(GLSLC)
     set(JOYRIDE_SHADER_DIR "${CMAKE_BINARY_DIR}/shaders")
     set(JOYRIDE_SHADER_HEADERS)
-    foreach(shader fullscreen.vert texfilter.frag hwquad.vert hwquad.frag composite.frag)
+    foreach(shader fullscreen.vert texfilter.frag hwquad.vert hwquad.frag composite.frag map.frag)
         set(out "${JOYRIDE_SHADER_DIR}/${shader}.h")
         add_custom_command(OUTPUT "${out}"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${JOYRIDE_SHADER_DIR}"
@@ -105,6 +105,7 @@ add_executable(joyride
     src/hle/hwrender.c
     src/platform/overlay.c
     src/platform/pad.c
+    src/platform/map.c
     $<TARGET_OBJECTS:joyride_gen>)
 target_include_directories(joyride PRIVATE src/hle)
 target_compile_options(joyride PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-format-truncation)

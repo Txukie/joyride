@@ -56,6 +56,13 @@ void joyride_pad_init(void);
 void joyride_pad_event(const void *sdl_event);
 void joyride_radio_step(int dir);
 
+/* the city map (src/platform/map.c) */
+void joyride_map_init(const char *install_root, const char *data_dir);
+void joyride_map_toggle(void);
+int  joyride_map_open(void);
+const uint8_t *joyride_map_picture(int *size, int *id);
+int  joyride_map_dots(float player[2], float obj[][2], int max);
+
 /* frames between the game's steps (smooth.c) */
 extern int joyride_smooth;
 void joyride_smooth_wait(void);

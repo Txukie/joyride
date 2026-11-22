@@ -31,7 +31,7 @@
  *           handbrake, Y exit, B special, L1/R1 radio station.
  *   classic The game's tank controls on the pad: left stick steers and
  *           its up/down (or R2/L2) go forward/back, same buttons.
- * Start: the game's Esc menu (it pauses the game). Select: reserved (map).
+ * Start: the game's Esc menu (it pauses the game). Select: the city map.
  * The right stick does not aim turrets yet.
  *
  * Values are sent only when they change, so the keyboard keeps working
@@ -247,5 +247,6 @@ void joyride_pad_input(uint32_t word) {
     uint32_t pressed = p.buttons & ~prev, released = prev & ~p.buttons;
     if (pressed & BTN(SDL_GAMEPAD_BUTTON_START)) joyride_screen_key(SDL_SCANCODE_ESCAPE, 1);
     if (released & BTN(SDL_GAMEPAD_BUTTON_START)) joyride_screen_key(SDL_SCANCODE_ESCAPE, 0);
+    if (pressed & BTN(SDL_GAMEPAD_BUTTON_BACK)) joyride_map_toggle();      /* Select: the map (map.c) */
     prev = p.buttons;
 }
