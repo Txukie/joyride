@@ -197,7 +197,10 @@ static void *build_all(void *arg) {
 /* At start-up: build the maps not built yet, in the background. */
 void joyride_map_init(const char *install_root, const char *data_dir) {
     snprintf(g_root, sizeof g_root, "%s", install_root);
-    snprintf(g_dir, sizeof g_dir, "%s/maps", data_dir);
+    const char *prof = getenv("JOYRIDE_PROFILE");          /* a game of its own (main.c): its own maps */
+    if (prof && *prof && !strchr(prof, '/') && strcmp(prof, ".") && strcmp(prof, ".."))
+        snprintf(g_dir, sizeof g_dir, "%s/maps-%.64s", data_dir, prof);
+    else snprintf(g_dir, sizeof g_dir, "%s/maps", data_dir);
     mkdir(g_dir, 0755);
     pthread_t t;
     if (pthread_create(&t, NULL, build_all, NULL) == 0) pthread_detach(t);

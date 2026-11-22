@@ -186,10 +186,15 @@ static void frame_hook(const uint8_t *px, int w, int h, int pitch, int bpp) {
     free(shown);
 }
 
+/* JOYRIDE_PROFILE=<name> (the launcher sets it for each game: London's
+ * saves are not GTA's) gives the game its own overlay, overlay-<name>,
+ * and its own city maps (map.c); the settings stay shared. */
 static void overlay_dir(char *out, size_t n) {
-    const char *xdg = getenv("XDG_DATA_HOME"), *home = getenv("HOME");
-    if (xdg && *xdg) snprintf(out, n, "%s/joyride/overlay", xdg);
-    else snprintf(out, n, "%s/.local/share/joyride/overlay", home ? home : ".");
+    const char *xdg = getenv("XDG_DATA_HOME"), *home = getenv("HOME"), *p = getenv("JOYRIDE_PROFILE");
+    char suffix[80] = "";
+    if (p && *p && !strchr(p, '/') && strcmp(p, ".") && strcmp(p, "..")) snprintf(suffix, sizeof suffix, "-%.64s", p);
+    if (xdg && *xdg) snprintf(out, n, "%s/joyride/overlay%s", xdg, suffix);
+    else snprintf(out, n, "%s/.local/share/joyride/overlay%s", home ? home : ".", suffix);
 }
 
 int main(int argc, char **argv) {
