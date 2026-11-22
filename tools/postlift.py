@@ -106,6 +106,11 @@ TEXAFTER[0x0047C125] = "{ extern void joyride_smooth_sprite_out(void); joyride_s
 for _a, _f in ((0x00496CF0, "joyride_hw_polygon"), (0x0049A78C, "joyride_hw_hwall"), (0x0049ABDC, "joyride_hw_vwall")):
     TEXAFTER[_a] = (f"{{ extern int {_f}(void); "
                     f"if ({_f}()) {{ esp += 4; RECOMP_FLAGS_OUT(); esp += 4; return; }} }}")
+# Controllers (src/platform/pad.c): the input reader 0x432E00 at 0x433141,
+# its action word complete at [esp + 0xc]; the pad's changes are added to
+# it there, then eax reloads it.
+TEXAFTER[0x00433141] = ("{ extern void joyride_pad_input(uint32_t); "
+                        "joyride_pad_input(esp + 0xC); eax = MEM32(esp + 0xC); }")
 # MGL's mode size lookup (0x48B770), right after it stores the height
 # (0x48BFE2 `mov [ecx], ebx`; the width went to [[esp + 0x420]]).
 TEXAFTER[0x0048BFE2] = ("{ extern void joyride_mode_size(uint32_t, uint32_t); "
@@ -135,7 +140,7 @@ def process(path: str) -> int:
         out.append(line)
         a = ADDR.search(line)
         if a and int(a.group(1), 16) in TEXAFTER and line.lstrip().startswith(("SET_HI8", "SET_LO8(eax, MEM8(0x503224))", "SET_LO8(eax, MEM8(0x502F34))", "RECOMP_CALL(sub_00430B20)", "RECOMP_CALL(sub_00430D40)",
-        "esp = esp - 0x10u", "esp = esp + 0x10u", "PUSH32(esp, esi)", "eax = MEM32(0x775580)", "edi = MEM32(0x4B8C58)", "esp = esp + 0x10u", "MEM32(ecx) = ebx", "MEM32(ecx + 0x24) = edx", "MEM8(ecx + 0x74F18C)", "edx =", "esi =", "PUSH32(esp, ebp)")):
+        "esp = esp - 0x10u", "esp = esp + 0x10u", "PUSH32(esp, esi)", "eax = MEM32(0x775580)", "edi = MEM32(0x4B8C58)", "eax = MEM32(esp + 0xC)", "esp = esp + 0x10u", "MEM32(ecx) = ebx", "MEM32(ecx + 0x24) = edx", "MEM8(ecx + 0x74F18C)", "edx =", "esi =", "PUSH32(esp, ebp)")):
             if True:
                 indent = line[:len(line) - len(line.lstrip())]
                 out.append(f"{indent}{TEXAFTER[int(a.group(1), 16)]}\n")

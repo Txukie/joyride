@@ -104,6 +104,7 @@ add_executable(joyride
     src/hle/smooth.c
     src/hle/hwrender.c
     src/platform/overlay.c
+    src/platform/pad.c
     $<TARGET_OBJECTS:joyride_gen>)
 target_include_directories(joyride PRIVATE src/hle)
 target_compile_options(joyride PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-format-truncation)

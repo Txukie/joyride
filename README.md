@@ -54,6 +54,7 @@ size, F12 or Esc closes. They are kept in `~/.local/share/joyride/joyride.cfg`.
   display's rate (60 fps at 60 Hz), filtered or not; larger sizes get fewer
   as the software renderer takes longer (about 30–36 at 1920×1080). Turning the game's limiter
   off (F8) still just runs the game faster.
+* **Controller** — modern (default) or classic; see *Controllers* below.
 * **Scaling** of the picture to the window: sharp (default), smooth,
   nearest, integer.
 * **Fullscreen** (also F11 or Alt+Enter).
@@ -61,7 +62,7 @@ size, F12 or Esc closes. They are kept in `~/.local/share/joyride/joyride.cfg`.
 With the software renderer, up to 2560×1440 keeps the game's full speed
 with filtering, but with few frames between steps; the GPU renderer keeps
 the display's rate there.
-`JOYRIDE_RES=<w>x<h>|desktop|game`, `JOYRIDE_RENDERER=software|gpu`,
+`JOYRIDE_RES=<w>x<h>|desktop|game`, `JOYRIDE_RENDERER=software|gpu`, `JOYRIDE_CONTROLLER=modern|classic`,
 `JOYRIDE_FILTER=0|1`, `JOYRIDE_SMOOTH=0|1` and `JOYRIDE_SCALE=<mode>` override
 the file for one run.
 
@@ -83,6 +84,57 @@ joyride plays with joyride, not with the original Windows game.
   on every machine).
 * A player who leaves is reported by the game ("Connection to … has failed")
   and the others play on.
+
+### Controllers
+
+Any controller SDL knows (Xbox, PlayStation, Switch, most others) works
+with no setup. Two schemes, switched in F12 → Controller
+(`controller=modern|classic` in `joyride.cfg`, `JOYRIDE_CONTROLLER` for one
+run). The keyboard keeps working alongside either.
+
+**Modern, on foot**
+
+| | |
+| --- | --- |
+| Left stick | run in that direction (the character turns to it, within ~3°) |
+| Right stick | face / aim that way; moving against it walks backwards, slower |
+| X | shoot / attack |
+| A | jump (over cars) |
+| Y | enter vehicle |
+| B | special |
+| L1 / R1 | previous / next weapon |
+
+With the right stick released the character faces where it runs, or where
+it last ran. GTA has no walk on foot (any push runs), so how far the stick
+is pushed doesn't change the speed; and no sidestep, so moving across where
+you aim doesn't move.
+
+**Modern, driving**
+
+| | |
+| --- | --- |
+| Left stick | steer (the game's own analog steering, 7 steps each way) |
+| R2 / L2 | accelerate / brake and reverse (4 levels each) |
+| X | shoot (tank, fire engine) |
+| A | handbrake |
+| Y | exit vehicle |
+| B | special |
+| L1 / R1 | previous / next radio station |
+
+**Both:** Start opens the game's Esc menu, which pauses it; Select is
+reserved for a map.
+
+**Classic** puts the game's own tank controls on the pad: left stick steers,
+up/down or R2/L2 go forward and back, same buttons.
+
+How it works: joyride adds the pad's input to the game's own per-step action
+word through the game's own handlers (`src/platform/pad.c`), so network
+games stay in step. The radio stations are the game's ten music tracks;
+L1/R1 move the car's music to the next or previous one without stopping,
+and the next car you get into plays its own station again.
+
+Not yet: aiming the tank's and fire engine's turret with the right stick,
+the map, and navigating the F12 menu with the controller.
 
 ### Keys
 
@@ -122,6 +174,8 @@ Nothing in the install is modified: saves, settings and the registry go to
 `~/.local/share/joyride/overlay`. Developer switches: `JOYRIDE_HEADLESS=1`,
 `JOYRIDE_DUMP=<dir>` (one frame per second as PPM), `JOYRIDE_QUIT_AFTER=<s>`,
 `JOYRIDE_KEYS="4:RETURN,15:UP:6"` (key presses, or holds, at times in seconds),
+`JOYRIDE_PAD_SCRIPT="20:1,0,0,0,0,0,0;23:..."` (a scripted controller: time,
+then left x/y, right x/y, L2, R2, buttons in hex), `JOYRIDE_PAD_LOG=1`,
 `JOYRIDE_MAX_FPS` (default the display's refresh rate in play, 60 in menus;
 0 = unlimited), `JOYRIDE_SMOOTH_DEBUG=1` (frame timing),
 `JOYRIDE_GPU_DEBUG=1` (SDL_GPU validation), `JOYRIDE_FPS=1` (frames shown and game

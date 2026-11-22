@@ -58,6 +58,7 @@ typedef struct {
     uint64_t pos;                   /* 32.32 fixed-point frames */
     uint8_t  buf[65536];            /* read cache */
     uint32_t buf_frame, buf_frames;
+    int      track, base_track;     /* music: the track playing, the one the game asked for */
 } stream_t;
 
 typedef struct {
@@ -356,6 +357,50 @@ static int wav_parse(stream_t *s) {
     }
 }
 
+/* ---- the radio: L1/R1 in a car (src/platform/pad.c) ------------------------
+ * GTA plays one of ten music files, ..//music//trackN.wav, as a car's
+ * radio; a station is a track. joyride_radio_step moves the playing music
+ * to the next or previous track without stopping it; a car the game starts
+ * music for afresh gets its own station again. */
+#define TRACKS 10
+static int g_radio_offset;
+
+static int track_of(const char *name) {
+    const char *t = strstr(name, "track");
+    int n;
+    if (!t || !strstr(name, "music") || sscanf(t + 5, "%d", &n) != 1 || n < 1 || n > TRACKS) return 0;
+    return n;
+}
+
+static FILE *open_track(int n, stream_t *s) {
+    char guest[64], host[1024];
+    snprintf(guest, sizeof guest, "..//music//track%d.wav", n);
+    if (!hle_host_path(guest, host, sizeof host)) return NULL;
+    stream_t t = *s;
+    t.f = fopen(host, "rb");
+    if (!t.f) return NULL;
+    if (!wav_parse(&t)) { fclose(t.f); return NULL; }
+    s->data_off = t.data_off, s->data_len = t.data_len;
+    s->channels = t.channels, s->bits = t.bits, s->rate = t.rate;
+    return t.f;
+}
+
+void joyride_radio_step(int dir) {
+    pthread_mutex_lock(&g_mix);
+    g_radio_offset = ((g_radio_offset + dir) % TRACKS + TRACKS) % TRACKS;
+    for (int i = 0; i < MAX_STREAMS; i++) {
+        stream_t *s = &g_stream[i];
+        if (!s->handle || !s->track) continue;
+        int n = (s->base_track - 1 + g_radio_offset) % TRACKS + 1;
+        FILE *f = open_track(n, s);
+        if (!f) continue;
+        fclose(s->f);
+        s->f = f, s->track = n, s->pos = 0, s->buf_frames = 0;
+        fprintf(stderr, "[mss] radio: track %d\n", n);
+    }
+    pthread_mutex_unlock(&g_mix);
+}
+
 /* (drv, char *filename, s32 stream_mem) -> HSTREAM */
 static void a_open_stream(void) {
     const char *name = ASTR(1);
@@ -378,6 +423,7 @@ static void a_open_stream(void) {
         }
         s->handle = new_handle(64);
         s->status = SMP_STOPPED; s->volume = 127; s->loops = 1;
+        if ((s->track = s->base_track = track_of(name))) g_radio_offset = 0;   /* a new car's own station */
         uint32_t h = s->handle;
         pthread_mutex_unlock(&g_mix);
         RET(h, 3);

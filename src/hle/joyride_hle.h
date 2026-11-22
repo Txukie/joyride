@@ -50,6 +50,12 @@ int  joyride_hw_active(void);                 /* this draw is the hardware rende
 void joyride_hw_mark(int band, int x0, int x1);   /* the CPU drew there (bands of 64 rows) */
 void joyride_gbuf_dims(int *pitch_px, int *rows);
 
+/* controllers (src/platform/pad.c) and the radio (mss.c) */
+extern int joyride_controls_modern;
+void joyride_pad_init(void);
+void joyride_pad_event(const void *sdl_event);
+void joyride_radio_step(int dir);
+
 /* frames between the game's steps (smooth.c) */
 extern int joyride_smooth;
 void joyride_smooth_wait(void);
@@ -65,6 +71,7 @@ typedef struct {
     int fullscreen;
     int smooth;             /* frames between the game's steps (smooth.c) */
     int hwrender;           /* the world drawn by the GPU (hwrender.c) */
+    int controls_modern;    /* the controller scheme (pad.c) */
 } joyride_settings;
 extern joyride_settings joyride_cfg;
 void joyride_config_load(const char *path);   /* then the JOYRIDE_* overrides */

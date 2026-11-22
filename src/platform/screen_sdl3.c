@@ -861,6 +861,9 @@ void hle_screen_pump(void) {
             hle_input_mouse(m, gx, gy);
             break;
         }
+        case SDL_EVENT_GAMEPAD_ADDED: case SDL_EVENT_GAMEPAD_REMOVED:
+            joyride_pad_event(&e);                       /* src/platform/pad.c */
+            break;
         case SDL_EVENT_MOUSE_WHEEL: {
             float y = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -e.wheel.y : e.wheel.y;
             if (y != 0) hle_input_wheel((int)(y * 120));
@@ -905,6 +908,7 @@ int hle_screen_open(const char *title, int fullscreen, int headless) {
 
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");        /* SIGINT and SIGTERM end the process */
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) { fprintf(stderr, "[screen] SDL: %s\n", SDL_GetError()); return -1; }
+    joyride_pad_init();
     g_win = SDL_CreateWindow(title, 1280, 960, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
                                                | (fullscreen ? SDL_WINDOW_FULLSCREEN : 0));
     if (!g_win) { fprintf(stderr, "[screen] window: %s\n", SDL_GetError()); return -1; }
