@@ -18,6 +18,7 @@
 #define JR_G8(a)  (*(const volatile uint8_t *)(uintptr_t)(RECOMP_MEM_BASE + (uint32_t)(a)))
 #define JR_G32(a) (*(const volatile uint32_t *)(uintptr_t)(RECOMP_MEM_BASE + (uint32_t)(a)))
 
+extern uint32_t joyride_rows;          /* the renderer's row table (display.c) */
 extern uint32_t joyride_texfilter, joyride_texc, joyride_texclamp;
 extern uint32_t *joyride_gb, joyride_gb_n;
 extern int joyride_gb_used;
@@ -36,7 +37,7 @@ void joyride_tex_record(uint32_t dst, uint32_t addr, uint32_t fu, uint32_t fv, u
     if (joyride_texfilter != 2) { joyride_texc = joyride_bilerp32(addr, fu, fv, pal, tr); return; }
     uint32_t t = JR_G8(addr);
     if (tr && !t) return;                                    /* the loop skips this texel */
-    uint32_t off = dst - JR_G32(0x503228), i = off >> 2;      /* from row 0 of the surface drawn into */
+    uint32_t off = dst - JR_G32(joyride_rows), i = off >> 2;      /* from row 0 of the surface drawn into */
     if ((off & 3) | (i >= joyride_gb_n)) return;
     pal &= 0xFFFF00FFu;
     uint32_t page = addr & ~0xFFFFu;

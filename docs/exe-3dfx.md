@@ -133,13 +133,13 @@ takes 28.6 ms of its 42.9 with the GPU path, so the game keeps its speed
 software rasterizer itself; drawing the game's quads on the GPU outright
 is the next step.
 
-The F12 settings overlay switches it (`JOYRIDE_FILTER=0|1|cpu` for one run).
+The F1 settings overlay switches it (`JOYRIDE_FILTER=0|1|cpu` for one run).
 `JOYRIDE_HEADLESS_GPU=1` with `JOYRIDE_GPU_DUMP=<dir>` filters without a
 window and saves the result (tests).
 
 ## The hardware renderer
 
-The F12 overlay's **Renderer: GPU** (`JOYRIDE_RENDERER=gpu`) goes the rest
+The F1 overlay's **Renderer: GPU** (`JOYRIDE_RENDERER=gpu`) goes the rest
 of the way the 3dfx build went: the CPU keeps the geometry, the GPU draws
 the world. `src/hle/hwrender.c` takes over the software rasterizer at the
 three places every 32-bit world draw passes through, and draws nothing:

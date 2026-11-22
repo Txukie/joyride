@@ -19,6 +19,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <SDL3/SDL_keyboard.h>
+
 #include "win32hle.h"
 #include "host.h"
 #include "joyride_hle.h"
@@ -87,13 +89,16 @@ static void parse_keys(const char *spec) {
         uint32_t hold = 120;                               /* "t:KEY:seconds" holds the key */
         char *dur = strchr(colon + 1, ':');
         if (dur) { *dur = 0; hold = (uint32_t)(atof(dur + 1) * 1000.0); }
+        int sdl = 0;
         for (size_t k = 0; k < sizeof KEYNAMES / sizeof KEYNAMES[0]; k++)
-            if (!strcasecmp(colon + 1, KEYNAMES[k].name)) {
-                g_script[g_script_n].at_ms = (uint32_t)(atof(tok) * 1000.0);
-                g_script[g_script_n].sdl = KEYNAMES[k].sdl;
-                g_script[g_script_n].hold_ms = hold;
-                g_script_n++;
-            }
+            if (!strcasecmp(colon + 1, KEYNAMES[k].name)) sdl = KEYNAMES[k].sdl;
+        if (!sdl) sdl = (int)SDL_GetScancodeFromName(colon + 1);     /* any other: SDL's name ("P", "F1") */
+        if (sdl) {
+            g_script[g_script_n].at_ms = (uint32_t)(atof(tok) * 1000.0);
+            g_script[g_script_n].sdl = sdl;
+            g_script[g_script_n].hold_ms = hold;
+            g_script_n++;
+        }
     }
 }
 
@@ -250,7 +255,7 @@ int main(int argc, char **argv) {
         return 69;
     }
 
-    /* Settings (the F12 overlay keeps them): joyride.cfg beside the overlay
+    /* Settings (the F1 overlay keeps them): joyride.cfg beside the overlay
      * directory, then the JOYRIDE_* overrides. After the screen is up, for
      * JOYRIDE_RES=desktop. */
     char cfgfile[PATH_MAX + 32];

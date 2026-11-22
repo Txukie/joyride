@@ -115,6 +115,24 @@ TEXAFTER[0x00433141] = ("{ extern void joyride_pad_input(uint32_t); "
 # (0x48BFE2 `mov [ecx], ebx`; the width went to [[esp + 0x420]]).
 TEXAFTER[0x0048BFE2] = ("{ extern void joyride_mode_size(uint32_t, uint32_t); "
                         "joyride_mode_size(MEM32(esp + 0x420), ecx); }")
+# The renderer's row table: the address of each screen row, [0x503228 +
+# 4 * y], filled at each mode switch (0x497BFA). It has room for 1706 rows
+# before the game's mode list at 0x504CD0, so taller screens (2160 rows)
+# would overwrite that. joyride gives it a bigger one in guest memory
+# (joyride_rows, src/hle/display.c): every indexed use is pointed there.
+ROWS = (re.compile(r"(MEM32\(\w+ \* 4 \+ )0x503228\)"), r"\1joyride_rows)")
+ROWS_M1 = (re.compile(r"(MEM32\(\w+ \* 4 \+ )0x503224\)"), r"\1joyride_rows - 4u)")
+
+# The area around each view where peds (and cars) live, 0x43CA30: half
+# width (height + 384) * 160 / zoom, half height 3/4 of it: a 4:3 screen's.
+# Peds are made 64 pixels outside it and removed past it, so on a wider
+# screen they pop in and out in view; joyride widens it to the view's
+# shape (src/hle/display.c), once the half height is taken.
+TEXAFTER[0x0043CA66] = ("{ extern uint32_t joyride_live_half_width(uint32_t, uint32_t); "
+                        "edi = joyride_live_half_width(edi, esi); }")
+# the same, each frame, in the camera update (0x43BB30; half width in ecx)
+TEXAFTER[0x0043BB62] = ("{ extern uint32_t joyride_live_half_width(uint32_t, uint32_t); "
+                        "ecx = joyride_live_half_width(ecx, esi); }")
 ADDR = re.compile(r"/\* 0x([0-9A-F]{8}): ")
 
 GOTO = re.compile(r"goto L_([0-9A-F]{8});.*/\* 0x([0-9A-F]{8}): (j\w*|loop\w*) ")
@@ -130,6 +148,8 @@ def process(path: str) -> int:
     out, added = [], 0
     hooked = 0
     for i, line in enumerate(lines):
+        for pat, rep in (ROWS, ROWS_M1):
+            line = pat.sub(rep, line)
         m = GOTO.search(line)
         if m and int(m.group(1), 16) <= int(m.group(2), 16):
             prev = out[-1] if out else ""

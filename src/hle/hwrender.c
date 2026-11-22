@@ -54,7 +54,7 @@ uint32_t joyride_tex_pal_slot(uint32_t pal);
 /* the surface the game draws into, from its row table */
 static uint32_t surface(uint32_t *pitch) {
     *pitch = MEM32(0x503218);
-    return MEM32(0x503228);
+    return MEM32(joyride_rows);
 }
 
 /* What the CPU drew over the key since the last clear, by bands of rows

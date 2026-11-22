@@ -1,10 +1,12 @@
 /*
  * joyride - the in-game settings overlay, and the settings file.
  *
- * F12 opens it over the game; in play the game pauses while it is open
- * (joyride_safe_point holds the game at its frame limiter, 0x47DC80, and
- * keeps the window showing). Up and Down pick a setting, Left and Right
- * change it, Enter applies a new screen size, F12 or Esc closes.
+ * F1 (or L3+R3 on a controller) opens it over the game; in play the game
+ * pauses while it is open (joyride_safe_point holds the game at its frame
+ * limiter, 0x47DC80, and keeps the window showing). Up and Down pick a
+ * setting, Left and Right change it, Enter applies a new screen size, F1
+ * or Esc closes. On a controller (src/platform/pad.c turns it into those
+ * keys): d-pad or left stick, A accepts, B goes back.
  *
  * Settings: the screen size in play (the game's own 1024x768, or any size
  * joyride's DirectDraw offers, widescreen included; src/hle/display.c),
@@ -79,7 +81,7 @@ void joyride_config_save(void) {
     snprintf(tmp, sizeof tmp, "%s.tmp", g_path);
     FILE *f = fopen(tmp, "w");
     if (!f) return;
-    fprintf(f, "# joyride settings (the F12 overlay writes this)\n");
+    fprintf(f, "# joyride settings (the F1 overlay writes this)\n");
     if (joyride_cfg.res_w) fprintf(f, "resolution=%dx%d\n", joyride_cfg.res_w, joyride_cfg.res_h);
     else fprintf(f, "resolution=game\n");
     fprintf(f, "filter=%d\n", joyride_cfg.filter);
@@ -179,7 +181,7 @@ static void apply_size(void) {
 }
 
 int joyride_overlay_key(int sc, int down, int repeat) {
-    if (sc == SDL_SCANCODE_F12) {
+    if (sc == SDL_SCANCODE_F1) {
         if (down && !repeat) set_open(!g_open);
         return 1;
     }
@@ -290,7 +292,7 @@ void joyride_overlay_draw(uint32_t *bgra, int w, int h) {
     y += 8;
     SDL_SetRenderDrawColor(r, 150, 150, 150, 255);
     int pending = g_sizes[g_size_i][0] != joyride_cfg.res_w || g_sizes[g_size_i][1] != joyride_cfg.res_h;
-    SDL_RenderDebugText(r, x, y, g_sel == ITEM_RES && pending ? "Enter: use this size" : "Arrows: change  F12: close");
+    SDL_RenderDebugText(r, x, y, g_sel == ITEM_RES && pending ? "Enter/A: use this size" : "Arrows: change  Esc/B: close");
 
     SDL_RenderPresent(r);
     SDL_DestroyRenderer(r);

@@ -32,7 +32,7 @@
  *      writes the blend. Where the GPU path is not available (no SPIR-V).
  *
  * 32-bit colour only: in 8-bit modes a blend has no palette entry, and the
- * 16-bit loops are not hooked yet. The F12 overlay switches it (overlay.c).
+ * 16-bit loops are not hooked yet. The F1 overlay switches it (overlay.c).
  */
 #include <stdint.h>
 #include <stdlib.h>

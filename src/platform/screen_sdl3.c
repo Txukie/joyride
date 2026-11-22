@@ -11,7 +11,7 @@
  * Scaling: sharp (nearest to an integer multiple, then linear
  * to the window: crisp pixels without uneven ones), smooth (linear),
  * nearest, integer (largest whole multiple that fits, black around).
- * F12: the settings overlay (src/platform/overlay.c), which holds these and
+ * F1: the settings overlay (src/platform/overlay.c), which holds these and
  * the screen size and texture filtering. F11 or Alt+Enter: fullscreen. Closing the window asks the game to quit
  * (WM_CLOSE); asking again quits outright.
  *
@@ -891,7 +891,7 @@ static void key_event(SDL_Scancode sc, int down, int repeat, SDL_Keymod mod) {
         }
         return;
     }
-    if (sc == SDL_SCANCODE_F12 || joyride_overlay_open()) {
+    if (sc == SDL_SCANCODE_F1 || joyride_overlay_open()) {
         if (joyride_overlay_key((int)sc, down, repeat)) return;
     }
     if (sc == SDL_SCANCODE_M) {                          /* the city map (map.c) */
@@ -953,6 +953,7 @@ void hle_screen_pump(void) {
         default: break;
         }
     }
+    joyride_pad_poll();                                  /* the pad in menus, L3+R3 (pad.c) */
     if (hle_screen_poll_hook) hle_screen_poll_hook();
     present(0);
 }
@@ -1001,7 +1002,7 @@ int hle_screen_open(const char *title, int fullscreen, int headless) {
                           ? SDL_GPU_PRESENTMODE_MAILBOX : SDL_GPU_PRESENTMODE_VSYNC;
     SDL_SetGPUSwapchainParameters(g_gpu, g_win, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, pm);
     if (fullscreen) SDL_HideCursor();
-    fprintf(stderr, "[screen] SDL %d.%d.%d, %s video, SDL_GPU on %s, %s present, F12 settings, F11 fullscreen\n",
+    fprintf(stderr, "[screen] SDL %d.%d.%d, %s video, SDL_GPU on %s, %s present, F1 settings, F11 fullscreen\n",
             SDL_VERSIONNUM_MAJOR(SDL_GetVersion()), SDL_VERSIONNUM_MINOR(SDL_GetVersion()),
             SDL_VERSIONNUM_MICRO(SDL_GetVersion()), SDL_GetCurrentVideoDriver(), SDL_GetGPUDeviceDriver(g_gpu),
             pm == SDL_GPU_PRESENTMODE_MAILBOX ? "mailbox" : "vsync");

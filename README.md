@@ -25,17 +25,19 @@ off, any key skips it).
 
 Network play works between joyride instances (see below).
 
-### Settings (F12)
+### Settings (F1)
 
-**F12** opens joyride's settings over the game (in play the game pauses
-while it is open). Up/Down pick, Left/Right change, Enter applies a screen
-size, F12 or Esc closes. They are kept in `~/.local/share/joyride/joyride.cfg`.
+**F1**, or **L3+R3** on a controller, opens joyride's settings over the
+game (in play the game pauses while it is open). Up/Down pick, Left/Right
+change, Enter applies a screen size, F1 or Esc closes; on a controller the
+d-pad or left stick move, A accepts, B goes back. They are kept in `~/.local/share/joyride/joyride.cfg`.
 
 * **Screen size** — the game plays at 1024×768 on its own; any size joyride
-  offers from 640×480 to 3840×1600 (the common 4:3, 16:9, 16:10 and 21:9
+  offers from 640×480 to 3840×2160 (the common 4:3, 16:9, 16:10 and 21:9
   sizes, and your desktop's), changed in play. Wider screens show more of
   the city to the sides at the game's usual zoom, instead of the game's own
-  behaviour of zooming in. Menus stay 640×480.
+  behaviour of zooming in, and people and traffic are made and removed
+out of sight at the screen's real edges. Menus stay 640×480.
 * **Renderer** — software (default: the game's own rasterizer, as
   released) or GPU: the world drawn by the graphics card the way the 3dfx
   version did it, the CPU keeping only the geometry. Same picture; it keeps
@@ -88,7 +90,7 @@ joyride plays with joyride, not with the original Windows game.
 ### Controllers
 
 Any controller SDL knows (Xbox, PlayStation, Switch, most others) works
-with no setup. Two schemes, switched in F12 → Controller
+with no setup. Two schemes, switched in F1 → Controller
 (`controller=modern|classic` in `joyride.cfg`, `JOYRIDE_CONTROLLER` for one
 run). The keyboard keeps working alongside either.
 
@@ -96,7 +98,7 @@ run). The keyboard keeps working alongside either.
 
 | | |
 | --- | --- |
-| Left stick | run in that direction (the character turns to it, within ~3°) |
+| Left stick | run in that direction (the character turns to it at once) |
 | Right stick | face / aim that way; moving against it walks backwards, slower |
 | X | shoot / attack |
 | A | jump (over cars) |
@@ -115,22 +117,28 @@ you aim doesn't move.
 | --- | --- |
 | Left stick | steer (the game's own analog steering, 7 steps each way) |
 | Right stick | aim the tank's turret where the stick points |
-| R2 / L2 | accelerate / brake and reverse (4 levels each) |
+| R2 / L2 | accelerate / brake and reverse, progressive: half way is half the pull |
 | X | shoot (tank, fire engine) |
 | A | handbrake |
 | Y | exit vehicle |
 | B | special |
 | L1 / R1 | previous / next radio station |
 
-**Both:** Start opens the game's Esc menu, which pauses it; Select shows
-the city map.
+**Both:** Start pauses the game (its own pause, as F6 does; again to
+resume); Select shows the city map; L3+R3 opens the settings. In the
+game's menus the d-pad or left stick move, A (or Start) accepts and B goes
+back.
 
 **Classic** puts the game's own tank controls on the pad: left stick steers,
 up/down or R2/L2 go forward and back, same buttons.
 
 How it works: joyride adds the pad's input to the game's own per-step action
 word through the game's own handlers (`src/platform/pad.c`), so network
-games stay in step. The radio stations are the game's ten music tracks;
+games stay in step; the one exception is the instant turn on foot, which
+sets the character's heading directly. The game's throttle and brake are
+on or off, so a trigger pressed part way switches them on for that share
+of the game's steps; the cars have drag, so half throttle also levels off
+at about half the top speed. The radio stations are the game's ten music tracks;
 L1/R1 move the car's music to the next or previous one without stopping,
 and the next car you get into plays its own station again.
 
@@ -140,8 +148,6 @@ Special is held with the steering pushed, and it doesn't steer the tank
 meanwhile, so joyride does the same: while the turret turns towards the
 right stick (about a third of a second for a quarter turn) the left stick
 doesn't steer; once it's on target, it does again.
-
-Not yet: navigating the F12 menu with the controller.
 
 ### City map (Select, or M)
 
@@ -161,8 +167,9 @@ See [`src/platform/map.c`](src/platform/map.c).
 
 | Key | |
 | --- | --- |
-| F12 | settings: screen size, renderer, textures, motion, controller, scaling, fullscreen |
+| F1 | settings: screen size, renderer, textures, motion, controller, scaling, fullscreen |
 | M | city map (+ / - zoom it while open) |
+| F6 | pause (the game's own) |
 | F11, Alt+Enter | fullscreen |
 | Esc, then Enter | quit (the game's own menu); closing the window twice also quits |
 

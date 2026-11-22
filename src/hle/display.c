@@ -35,7 +35,10 @@
  * the screen were 4:3 at that height (the same for 4:3 modes), and
  * joyride_square_pixels keeps pixels square: a wider screen shows more of
  * the city to the sides at the usual zoom. The renderer's tables have room
- * for 4096 columns and about 1700 rows; sizes past 3840x1600 are refused.
+ * for 4096 columns; its row table (the address of each row, 0x503228) for
+ * 1706 rows before the game's mode list, so joyride moves it to a table of
+ * 4096 rows in guest memory (joyride_rows; tools/postlift.py points the
+ * lifted code at it). Sizes up to 3840x2160 are accepted.
  * tools/postlift.py splices all of these into the lifted code.
  */
 #include <stdio.h>
@@ -46,7 +49,9 @@
 #include "joyride_hle.h"
 
 #define MAX_W 3840
-#define MAX_H 1600
+#define MAX_H 2160
+#define ROWS 4096
+#define GUARD (512u * 1024u - ROWS * 2)
 
 static int g_sw, g_sh;               /* the size chosen, 0 = the game's own */
 static int g_cw = 1600, g_ch = 1200; /* the custom slot's size */
@@ -62,7 +67,8 @@ static int native(int w, int h) {
 }
 
 int joyride_display_valid(int w, int h) {
-    return w >= 640 && h >= 480 && w <= MAX_W && h <= MAX_H;
+    int max_h = joyride_rows == 0x503228 && g_mgl_ok ? 1600 : MAX_H;
+    return w >= 640 && h >= 480 && w <= MAX_W && h <= max_h;
 }
 
 static void set_mgl(int w, int h) {
@@ -72,7 +78,15 @@ static void set_mgl(int w, int h) {
     }
 }
 
+uint32_t joyride_rows = 0x503228;   /* the renderer's row table; the game's own until setup */
+
 void joyride_display_setup(int w, int h) {
+    /* the wall drawers (0x49ABDC) look a span's first row up before they
+     * clip it, so rows far off the screen are read (and then not used):
+     * the table sits in the middle of 1 MB of zeros */
+    uint32_t t = hle_vm_reserve(0, GUARD * 2 + ROWS * 4);
+    if (t) joyride_rows = t + GUARD;
+    else fprintf(stderr, "[joyride] no guest memory for the row table; screens up to 1600 rows only\n");
     g_mgl_ok = 1;
     for (size_t i = 0; i < sizeof k_mgl_1600 / sizeof *k_mgl_1600; i++)
         if (MEM32(k_mgl_1600[i]) != 1599 || MEM32(k_mgl_1600[i] + 4) != 1199) g_mgl_ok = 0;
@@ -96,6 +110,15 @@ void joyride_mode_size(uint32_t wp, uint32_t hp) {
 uint32_t joyride_view_scale(uint32_t view_h, uint32_t zoom, uint32_t scale) {
     (void)scale;
     return (uint32_t)(int32_t)((int64_t)((int64_t)view_h * 4 / 3) * (int32_t)zoom / 320);
+}
+
+/* 0x43CA66: the half width (world pixels) of the area peds and cars live
+ * in around view `v`, made for a 4:3 view: as wide as the view really is
+ * (its width and height at +8, +0xC). */
+uint32_t joyride_live_half_width(uint32_t half, uint32_t v) {
+    int64_t w = (int32_t)MEM32(v + 8), h = (int32_t)MEM32(v + 0xC);
+    if (h <= 0 || w * 3 <= h * 4) return half;
+    return (uint32_t)((int64_t)(int32_t)half * w * 3 / (h * 4));
 }
 
 /* 0x46456E: a view that is not 4:3 gets its y squashed by 5/6, for modes

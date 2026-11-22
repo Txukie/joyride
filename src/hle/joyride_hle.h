@@ -30,6 +30,7 @@ void joyride_display_request(int w, int h);
 void joyride_display_apply(void);
 void joyride_display_current(int *w, int *h);
 int  joyride_display_valid(int w, int h);
+extern uint32_t joyride_rows;              /* the renderer's row table (guest address) */
 
 /* the hardware renderer (hwrender.c): the world's quads, drawn by the GPU */
 #define JOYRIDE_KEY 0xA5FF00FFu            /* the surface before the CPU draws (no game colour has A5 on top) */
@@ -57,6 +58,7 @@ void joyride_pad_event(const void *sdl_event);
 void joyride_radio_step(int dir);
 
 /* the city map (src/platform/map.c) */
+void joyride_pad_poll(void);                /* each pump: the pad in menus (pad.c) */
 void joyride_map_init(const char *install_root, const char *data_dir);
 void joyride_map_toggle(void);
 int  joyride_map_open(void);
