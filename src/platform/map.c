@@ -29,8 +29,11 @@
  * arrows (0x784234, kind at 0x784744: a car or a person by id, or a
  * point; the red arrow at 0x785110 when 0x78472C is set) as bright red
  * dots. The current city is the map file the game loaded ([0x6B3E88]).
+ * D-pad up and down (+ and - on the keyboard) zoom in and out, up to 8x,
+ * following the player; objectives out of view stay pinned to the edge.
  */
 #include <ctype.h>
+#include <math.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -207,6 +210,39 @@ void joyride_map_init(const char *install_root, const char *data_dir) {
 
 void joyride_map_toggle(void) { g_open = !g_open; }
 int joyride_map_open(void) { return g_open; }
+
+/* Zoom (d-pad up/down, or + and - on the keyboard, while the map is
+ * open): 1x (the whole city) to 8x, doubling; kept between openings.
+ * Zoomed in, the view follows the player and stops at the city's edges. */
+#define ZOOM_MAX 3                                        /* 2^3 = 8x */
+static int g_zoom;
+static float g_shown = 1.0f;                              /* the zoom on screen, easing to 2^g_zoom */
+
+void joyride_map_zoom(int dir) {
+    if (!g_open) return;
+    g_zoom += dir > 0 ? 1 : -1;
+    if (g_zoom < 0) g_zoom = 0;
+    if (g_zoom > ZOOM_MAX) g_zoom = ZOOM_MAX;
+}
+
+/* The part of the city to show, now (`ms` a clock in milliseconds): its
+ * top-left in map units (0..1) and its size; the player at `player`. */
+void joyride_map_view(uint32_t ms, const float player[2], float view[3]) {
+    static uint32_t last;
+    float dt = last ? (float)(ms - last) / 1000.0f : 1.0f;
+    last = ms;
+    if (dt > 0.25f) dt = 0.25f;
+    float want = (float)(1 << g_zoom);
+    g_shown += (want - g_shown) * (1.0f - expf(-dt * 14.0f));   /* about 0.2 s */
+    if (fabsf(want - g_shown) < 0.002f) g_shown = want;
+    float size = 1.0f / g_shown;
+    float x = player[0] - size / 2, y = player[1] - size / 2;
+    if (x > 1.0f - size) x = 1.0f - size;
+    if (y > 1.0f - size) y = 1.0f - size;
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    view[0] = x, view[1] = y, view[2] = size;
+}
 
 /* the city now: the map file the game loaded */
 static int city(void) {

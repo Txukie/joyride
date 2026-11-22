@@ -145,6 +145,9 @@ person, and the red arrow's) as bright red dots. GTA has no map picture, so
 joyride draws one for each of the three cities from the game's own map and
 texture files the first time it runs (a few seconds, in the background) and
 keeps them in `~/.local/share/joyride/maps/`; delete them to rebuild.
+While it is open, d-pad up and down (or + and - on the keyboard) zoom in
+and out, from the whole city to 8x; zoomed in, the map follows you, and
+objectives out of view stay pinned to its edge.
 See [`src/platform/map.c`](src/platform/map.c).
 
 ### Keys
@@ -152,7 +155,7 @@ See [`src/platform/map.c`](src/platform/map.c).
 | Key | |
 | --- | --- |
 | F12 | settings: screen size, renderer, textures, motion, controller, scaling, fullscreen |
-| M | city map |
+| M | city map (+ / - zoom it while open) |
 | F11, Alt+Enter | fullscreen |
 | Esc, then Enter | quit (the game's own menu); closing the window twice also quits |
 

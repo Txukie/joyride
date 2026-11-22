@@ -607,12 +607,13 @@ static void map_pass(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *pic, int pw, int
         SDL_ReleaseGPUTransferBuffer(g_gpu, up);
         g_map_id = id;
     }
-    struct { float rect[4], player[4], obj[8][4], count[4]; } u = { 0 };
+    struct { float rect[4], view[4], player[4], obj[8][4], count[4]; } u = { 0 };
     float side = (float)(pw < ph ? pw : ph) * 0.96f;
     u.rect[0] = ((float)pw - side) / 2, u.rect[1] = ((float)ph - side) / 2, u.rect[2] = side;
     u.rect[3] = side / 160.0f < 3.0f ? 3.0f : side / 160.0f;
     float pl[2], ob[8][2];
     int n = joyride_map_dots(pl, ob, 8);
+    joyride_map_view(hle_ticks_ms(), pl, u.view);
     u.player[0] = pl[0], u.player[1] = pl[1], u.player[2] = 1;
     for (int i = 0; i < n; i++) u.obj[i][0] = ob[i][0], u.obj[i][1] = ob[i][1];
     u.count[0] = (float)n;
@@ -896,6 +897,11 @@ static void key_event(SDL_Scancode sc, int down, int repeat, SDL_Keymod mod) {
     if (sc == SDL_SCANCODE_M) {                          /* the city map (map.c) */
         if (down && !repeat) joyride_map_toggle();
         return;
+    }
+    if (joyride_map_open() && (sc == SDL_SCANCODE_EQUALS || sc == SDL_SCANCODE_KP_PLUS ||
+                               sc == SDL_SCANCODE_MINUS || sc == SDL_SCANCODE_KP_MINUS)) {
+        if (down) joyride_map_zoom(sc == SDL_SCANCODE_EQUALS || sc == SDL_SCANCODE_KP_PLUS ? +1 : -1);
+        return;                                          /* map zoom, while it is open */
     }
     int vk = vk_of(sc);
     if (vk) hle_input_key(down, (uint32_t)vk, scan_of(sc));

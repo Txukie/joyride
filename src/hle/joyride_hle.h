@@ -60,6 +60,8 @@ void joyride_radio_step(int dir);
 void joyride_map_init(const char *install_root, const char *data_dir);
 void joyride_map_toggle(void);
 int  joyride_map_open(void);
+void joyride_map_zoom(int dir);
+void joyride_map_view(uint32_t ms, const float player[2], float view[3]);
 const uint8_t *joyride_map_picture(int *size, int *id);
 int  joyride_map_dots(float player[2], float obj[][2], int max);
 
