@@ -17,6 +17,7 @@ int main(int argc, char **argv) {
     if (argc >= 2 && !std::strcmp(argv[1], "list")) {
         for (auto &g : jl::games())
             std::printf("%-11s %-28s %s\n", g.id.c_str(), g.title.c_str(), jl::installed(g.id) ? jl::playDir(g.id).c_str() : "-");
+        for (auto &s : jl::steamGtaInstalls()) std::printf("steam: %s\n", s.c_str());
         return 0;
     }
     if (argc == 4 && !std::strcmp(argv[1], "install")) {

@@ -28,6 +28,8 @@ std::string gameDir(const std::string &id);
 // not installed; for GTA an install elsewhere may be used where it is
 std::string playDir(const std::string &id);
 bool installed(const std::string &id);
+// GTA installs in Steam's libraries (libraryfolders.vdf), to offer
+std::vector<std::string> steamGtaInstalls();
 
 // The 2002 executable joyride is a recompilation of
 extern const char *const kGtaExeSha1;

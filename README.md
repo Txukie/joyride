@@ -211,6 +211,39 @@ the next model the city has (all but the tank). See
    DirectPlay, WinMM and Win32 calls are reimplemented on SDL3 (SDL_GPU, audio streams, input).
 5. **Validate** generated code against traces from the original running game.
 
+## Launcher
+
+`launcher/` is a front end for all of it, made for a controller as much as
+for keys and mouse (Qt Quick; controllers through SDL3: d-pad or stick
+move, A chooses, B goes back, Start plays):
+
+* **Grand Theft Auto** — uses a Steam copy it
+  finds, or an installer or install folder you choose.
+* **GTA: London 1969** — from your own disc: a BIN/CUE image (its music is
+  taken from the audio tracks), an ISO, or the mounted disc. It was never
+  released as freeware, so the launcher does not download it.
+* **GTA: London 1961** — uses
+  your copy of `GTAL1961.EXE`. Needs London 1969.
+* **Grand Theft Auto 2** — listed, not playable yet.
+* **Prepare joyride** runs `tools/lift.sh` on your GTA executable and the
+  build (once, a few minutes); **Settings** edits the same
+  `joyride.cfg` as the in-game F1 menu; **Play** starts the game.
+
+London runs on the same recompiled 2002 executable: its files go over GTA's
+under GTA's names, and its levels into the slots the 2002 front end has
+(see `launcher/src/core/games.cpp`). London 1961's drive-bys are switched
+off for now (the 2002 executable has no drive-by). Each London game keeps its
+own saves and city maps (`JOYRIDE_PROFILE`).
+
+```bash
+cmake -S launcher -B build-launcher -G Ninja && cmake --build build-launcher
+build-launcher/joyride-launcher
+# needs: Qt 6.5+ (Quick, QuickControls2, Network), SDL3, libarchive, zlib.
+# Without Qt, build-launcher/joyride-setup does the installing from the command line.
+```
+
+Installs go to `~/.local/share/joyride/games/`.
+
 ## Getting started
 
 ```bash

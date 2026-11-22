@@ -174,6 +174,29 @@ std::string playDir(const std::string &id) {
 }
 bool installed(const std::string &id) { return !playDir(id).empty(); }
 
+std::vector<std::string> steamGtaInstalls() {
+    const char *home = std::getenv("HOME");
+    std::vector<std::string> libs, out;
+    for (const char *base : { "/.local/share/Steam", "/.steam/steam", "/.var/app/com.valvesoftware.Steam/.local/share/Steam" }) {
+        std::string root = std::string(home ? home : "") + base;
+        libs.push_back(root);
+        std::ifstream vdf(root + "/steamapps/libraryfolders.vdf");
+        std::string line;
+        std::regex path(R"re("path"\s+"([^"]+)")re");
+        std::smatch m;
+        while (std::getline(vdf, line))
+            if (std::regex_search(line, m, path)) libs.push_back(m[1].str());
+    }
+    for (auto &l : libs) {
+        fs::path p = fs::path(l) / "steamapps" / "common" / "Grand Theft Auto";
+        std::error_code ec;
+        if (!isGtaInstall(p)) continue;
+        std::string c = fs::canonical(p, ec).string();
+        if (!ec && std::find(out.begin(), out.end(), c) == out.end()) out.push_back(c);
+    }
+    return out;
+}
+
 // ---- the FXT text files -----------------------------------------------------
 
 // The text is stored with each byte one up and the first eight also
