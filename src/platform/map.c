@@ -5,7 +5,7 @@
  * own data, the first time it runs, and keeps it in
  * ~/.local/share/joyride/maps/<city>.bmp:
  *
- *   <city>.CMP  28-byte header (version, style number, ...; then the sizes
+ *   <city>.CMP  (as the mission script names it) 28-byte header (version, style number, ...; then the sizes
  *               of the route, object, column, block and nav sections), a
  *               256x256 table of column offsets, the columns (empty levels
  *               at the top, then that many fewer than 6 block numbers, from
@@ -28,13 +28,15 @@
  * position, ped +0x90/+0x94; driving, the car's centre), the game's objective
  * arrows (0x784234, kind at 0x784744: a car or a person by id, or a
  * point; the red arrow at 0x785110 when 0x78472C is set) as bright red
- * dots. The current city is the map file the game loaded ([0x6B3E88]).
+ * dots. The current city is the map file the game loaded ([0x6B3E88]); the
+ * cities built are those the mission script names (London's uk\\uk.cmp too).
  */
 #include <ctype.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 
 #include "win32hle.h"
@@ -43,8 +45,12 @@
 #define CELL 8
 #define MAPPX (256 * CELL)
 
-static const char *const k_cities[] = { "nyc", "sanb", "miami" };
-#define NCITY 3
+/* The cities: the map files the mission script names (", 22, nyc.cmp,";
+ * London's "uk\\uk.cmp"), each map kept as its name made a file name
+ * (nyc.bmp, uk_uk.bmp). */
+#define MAXCITY 16
+static char g_city[MAXCITY][64];
+static int g_ncity;
 
 static char g_root[4096], g_dir[4096];
 static int g_open;
@@ -68,11 +74,16 @@ static uint8_t *slurp(const char *path, size_t *n) {
 static uint8_t *game_file(const char *name, size_t *n) {
     char path[4200], up[64];
     size_t i = 0;
-    for (; name[i] && i < sizeof up - 1; i++) up[i] = (char)toupper((unsigned char)name[i]);
-    up[i] = 0;
+    char low[64];
+    for (; name[i] && i < sizeof up - 1; i++) {
+        char c = name[i] == '\\' ? '/' : name[i];
+        up[i] = (char)toupper((unsigned char)c), low[i] = (char)tolower((unsigned char)c);
+    }
+    up[i] = low[i] = 0;
     snprintf(path, sizeof path, "%s/GTADATA/%s", g_root, up);
     uint8_t *d = slurp(path, n);
-    if (!d) { snprintf(path, sizeof path, "%s/gtadata/%s", g_root, name); d = slurp(path, n); }
+    if (!d) { snprintf(path, sizeof path, "%s/GTADATA/%s", g_root, low); d = slurp(path, n); }
+    if (!d) { snprintf(path, sizeof path, "%s/gtadata/%s", g_root, low); d = slurp(path, n); }
     return d;
 }
 
@@ -116,8 +127,7 @@ static uint8_t *read_bmp(const char *path) {               /* our own files only
 static int build(const char *city, const char *out) {
     char name[32];
     size_t cn, sn;
-    snprintf(name, sizeof name, "%s.cmp", city);
-    uint8_t *cmp = game_file(name, &cn);
+    uint8_t *cmp = game_file(city, &cn);
     if (!cmp || cn < 28 + 262144) { free(cmp); return 0; }
     snprintf(name, sizeof name, "style%03u.g24", cmp[4]);
     uint8_t *sty = game_file(name, &sn);
@@ -128,10 +138,15 @@ static int build(const char *city, const char *out) {
     uint32_t h[16];
     for (int i = 0; i < 16; i++) h[i] = u32(sty + 4 * i);
     uint32_t nside = h[1] / 4096, ntiles = (h[1] + h[2] + h[3]) / 4096;
-    size_t clut0 = 64 + (size_t)h[1] + h[2] + h[3] + h[4];
+    /* from the end: the palette index and what follows it; the colour
+     * tables, padded to 64 KB, end where the index begins (an 8 KB block
+     * comes between the tiles and the tables: reading them from just after
+     * the tiles gave London's map other tiles' colours) */
     size_t rest = (size_t)h[10] + h[11] + h[12] + h[13] + h[14] + h[15];
-    size_t pal0 = sn - rest;                               /* the colour tables are padded */
-    if ((size_t)(blks - cmp) + blk_size > cn || pal0 <= clut0 || pal0 + h[10] > sn) { free(cmp); free(sty); return 0; }
+    size_t pal0 = sn - rest;
+    size_t cluts = ((size_t)h[5] + 0xFFFF) & ~(size_t)0xFFFF;
+    size_t clut0 = pal0 > cluts ? pal0 - cluts : 0;
+    if ((size_t)(blks - cmp) + blk_size > cn || clut0 < 64 + (size_t)h[1] + h[2] + h[3] || pal0 + h[10] > sn) { free(cmp); free(sty); return 0; }
 
     uint8_t *rgb = calloc((size_t)MAPPX * MAPPX, 3);
     for (int cy = 0; cy < 256; cy++)
@@ -179,17 +194,77 @@ static int build(const char *city, const char *out) {
     return 1;
 }
 
+/* a map file's name as the picture's: lower case, folders joined by '_',
+ * no ".cmp" ("uk\\uk.cmp" -> "uk_uk") */
+static void city_key(const char *name, char *out, size_t n) {
+    size_t j = 0;
+    for (size_t i = 0; name[i] && j + 1 < n; i++) {
+        char c = (char)tolower((unsigned char)name[i]);
+        if (c == '.' && !strncasecmp(name + i, ".cmp", 4)) break;
+        out[j++] = c == '\\' || c == '/' ? '_' : isalnum((unsigned char)c) ? c : '_';
+    }
+    out[j] = 0;
+}
+
+/* the map files the mission script names, each once */
+static void find_cities(void) {
+    size_t n;
+    uint8_t *ini = game_file("mission.ini", &n);
+    g_ncity = 0;
+    if (!ini) return;
+    for (size_t i = 0; i + 4 < n && g_ncity < MAXCITY; i++) {
+        if (tolower(ini[i]) != '.' || tolower(ini[i + 1]) != 'c' || tolower(ini[i + 2]) != 'm' || tolower(ini[i + 3]) != 'p') continue;
+        size_t b = i;                                     /* back to the ", " before the name */
+        while (b > 0 && ini[b - 1] != ' ' && ini[b - 1] != ',' && ini[b - 1] != '\n' && i - b < 48) b--;
+        char name[64];
+        size_t len = i + 4 - b;
+        if (len >= sizeof name || len <= 4) continue;
+        memcpy(name, ini + b, len), name[len] = 0;
+        int seen = 0;
+        for (int c = 0; c < g_ncity; c++) seen |= !strcasecmp(g_city[c], name);
+        if (!seen) snprintf(g_city[g_ncity++], sizeof g_city[0], "%s", name);
+    }
+    free(ini);
+}
+
+/* The maps' format: maps made before it are made again (2: the colour
+ * tables' place fixed, London's cities) */
+#define MAP_FORMAT "2"
+static void check_format(void) {
+    char path[4200], have[16] = "";
+    snprintf(path, sizeof path, "%s/format", g_dir);
+    FILE *f = fopen(path, "r");
+    if (f) { if (!fgets(have, sizeof have, f)) have[0] = 0; fclose(f); }
+    if (!strncmp(have, MAP_FORMAT, strlen(MAP_FORMAT))) return;
+    const char *old[] = { "nyc", "sanb", "miami" };       /* format 1 made only these */
+    for (int i = 0; i < 3; i++) {
+        char p[4200];
+        snprintf(p, sizeof p, "%s/%s.bmp", g_dir, old[i]);
+        remove(p);
+    }
+    for (int i = 0; i < g_ncity; i++) {
+        char p[4200], key[64];
+        city_key(g_city[i], key, sizeof key);
+        snprintf(p, sizeof p, "%s/%s.bmp", g_dir, key);
+        remove(p);
+    }
+    if ((f = fopen(path, "w"))) { fputs(MAP_FORMAT "\n", f); fclose(f); }
+}
+
 static void *build_all(void *arg) {
     (void)arg;
-    for (int i = 0; i < NCITY; i++) {
-        char path[4200];
+    find_cities();
+    check_format();
+    for (int i = 0; i < g_ncity; i++) {
+        char path[4200], key[64];
         struct stat st;
-        snprintf(path, sizeof path, "%s/%s.bmp", g_dir, k_cities[i]);
+        city_key(g_city[i], key, sizeof key);
+        snprintf(path, sizeof path, "%s/%s.bmp", g_dir, key);
         if (stat(path, &st) == 0) continue;
         char tmp[4300];
         snprintf(tmp, sizeof tmp, "%s.tmp", path);
-        if (build(k_cities[i], tmp)) { rename(tmp, path); fprintf(stderr, "[map] built %s\n", path); }
-        else fprintf(stderr, "[map] could not build the %s map\n", k_cities[i]);
+        if (build(g_city[i], tmp)) { rename(tmp, path); fprintf(stderr, "[map] built %s\n", path); }
+        else fprintf(stderr, "[map] could not build the %s map\n", g_city[i]);
     }
     return NULL;
 }
@@ -212,31 +287,36 @@ void joyride_map_toggle(void) { g_open = !g_open; }
 int joyride_map_open(void) { return g_open; }
 
 
-/* the city now: the map file the game loaded */
-static int city(void) {
-    char name[16] = { 0 };
-    for (int i = 0; i < 15; i++) name[i] = (char)tolower(MEM8(0x6B3E88 + i));
-    for (int i = 0; i < NCITY; i++)
-        if (!strncmp(name, k_cities[i], strlen(k_cities[i])) && name[strlen(k_cities[i])] == '.') return i;
-    return -1;
+/* the city now: the map file the game loaded, as its picture's name */
+static int city(char *key, size_t n) {
+    char name[64] = { 0 };
+    for (int i = 0; i < 63; i++) {
+        name[i] = (char)MEM8(0x6B3E88 + i);
+        if (!name[i]) break;
+    }
+    if (!name[0]) return 0;
+    city_key(name, key, n);
+    return key[0] != 0;
 }
 
 /* The picture for the city in play (BGRA, MAPPX square; NULL if none yet):
  * `*id` changes when it does. */
 const uint8_t *joyride_map_picture(int *size, int *id) {
-    static int loaded = -1;
+    static char loaded[64];
+    static int serial;
     static uint8_t *pic;
-    int c = city();
-    if (c < 0) return NULL;
-    if (c != loaded) {
+    char key[64];
+    if (!city(key, sizeof key)) return NULL;
+    if (strcmp(key, loaded)) {
         char path[4200];
-        snprintf(path, sizeof path, "%s/%s.bmp", g_dir, k_cities[c]);
+        snprintf(path, sizeof path, "%s/%s.bmp", g_dir, key);
         uint8_t *p = read_bmp(path);
         if (!p) return NULL;                               /* still building */
         free(pic);
-        pic = p, loaded = c;
+        pic = p, serial++;
+        snprintf(loaded, sizeof loaded, "%s", key);
     }
-    *size = MAPPX, *id = loaded;
+    *size = MAPPX, *id = serial;
     return pic;
 }
 
