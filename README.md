@@ -116,7 +116,7 @@ you aim doesn't move.
 | Left stick | steer (the game's own analog steering, 7 steps each way) |
 | Right stick | aim the tank's turret where the stick points |
 | R2 / L2 | accelerate / brake and reverse (4 levels each) |
-| X | shoot (tank) |
+| X | shoot (tank, fire engine) |
 | A | handbrake |
 | Y | exit vehicle |
 | B | special |
