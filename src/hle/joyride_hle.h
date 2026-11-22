@@ -96,6 +96,7 @@ typedef struct {
     int smooth;             /* frames between the game's steps (smooth.c) */
     int hwrender;           /* the world drawn by the GPU (hwrender.c) */
     int controls_modern;    /* the controller scheme (pad.c) */
+    int hud;                /* HUD size with the GPU renderer: 0 auto, else that many times */
 } joyride_settings;
 extern joyride_settings joyride_cfg;
 void joyride_config_load(const char *path);   /* then the JOYRIDE_* overrides */
@@ -112,7 +113,8 @@ int  joyride_screen_fullscreen(int set);
 void joyride_screen_refresh(void);             /* show the current frame again */
 uint64_t joyride_screen_frame_ns(void);        /* frame time at the cap, 0 = uncapped */
 int  joyride_screen_gpu_filter(void);          /* the presenter can filter on the GPU */
-int  joyride_screen_hwrender(void);            /* ... and draw the world (hardware renderer) */       /* when a paced flip can next show (SDL ns) */
+int  joyride_screen_hwrender(void);
+int  joyride_screen_hud_scale(int h);          /* the HUD's size for a picture h rows high */            /* ... and draw the world (hardware renderer) */       /* when a paced flip can next show (SDL ns) */
 void joyride_screen_key(int sdl_scancode, int down);   /* as if from the keyboard */
 
 /* 1 while joyride's Flip marks the primary (src/platform/screen_sdl3.c) */

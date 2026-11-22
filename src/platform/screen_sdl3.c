@@ -800,12 +800,136 @@ static int hw_scan(const uint8_t *px, int w, int h, int pitch, band_t *bands) {
     return nb;
 }
 
+/* ---- the HUD, larger --------------------------------------------------- */
+
+/* The game draws its HUD at the size it had at 640 x 480, at any screen
+ * size: at 4K a score is 25 pixels high. With the GPU renderer the CPU's
+ * layer is nothing but the HUD and the game's text, so it is enlarged here,
+ * by whole times (pixels stay sharp), piece by piece: the layer's pieces
+ * (what is drawn, with gaps of up to 16 pixels closed) found on a grid of
+ * 8 x 8 cells; a piece near an edge of the screen stays on that edge (the
+ * score in its corner), one away from the edges grows about its middle
+ * (WASTED!, the mission text). */
+int joyride_screen_hud_scale(int h) {
+    if (joyride_cfg.hud > 0) return joyride_cfg.hud;
+    int k = (h + 360) / 720;                          /* 4K: 3, 1440p and 1080p: 2 */
+    return k < 1 ? 1 : k;
+}
+
+#define HUD_CELL 8
+#define HUD_MAXBOX 64
+typedef struct { int x, y, w, h; int dx, dy, k; } hudbox_t;
+static int hud_boxes(const uint8_t *px, int w, int h, int pitch, const band_t *bands, int nb, int k, hudbox_t *box) {
+    static uint8_t *grid;
+    static int *stack, gcap;
+    int gw = (w + HUD_CELL - 1) / HUD_CELL, gh = (h + HUD_CELL - 1) / HUD_CELL;
+    if (gw * gh > gcap) {
+        free(grid), free(stack);
+        grid = malloc((size_t)gw * gh), stack = malloc(sizeof(int) * (size_t)gw * gh);
+        gcap = grid && stack ? gw * gh : 0;
+        if (!gcap) return -1;
+    }
+    memset(grid, 0, (size_t)gw * gh);
+    for (int b = 0; b < nb; b++) {                    /* 1: something drawn in the cell */
+        if (bands[b].x1 < bands[b].x0) continue;
+        for (int y = b * HW_BAND; y < h && y < (b + 1) * HW_BAND; y++) {
+            const uint32_t *row = (const uint32_t *)(px + (size_t)y * (size_t)pitch);
+            uint8_t *g = grid + (size_t)(y / HUD_CELL) * gw;
+            for (int x = bands[b].x0; x <= bands[b].x1; x++)
+                if (row[x] != JOYRIDE_KEY) g[x / HUD_CELL] = 1, x |= HUD_CELL - 1;   /* the cell is known: on to the next */
+        }
+    }
+    int n = 0;
+    for (int c = 0; c < gw * gh; c++) {               /* the pieces: 2 marks one seen */
+        if (grid[c] != 1) continue;
+        if (n == HUD_MAXBOX) return -1;
+        int sp = 0, x0 = gw, y0 = gh, x1 = -1, y1 = -1;
+        stack[sp++] = c, grid[c] = 2;
+        while (sp) {
+            int e = stack[--sp], ex = e % gw, ey = e / gw;
+            if (ex < x0) x0 = ex;
+            if (ex > x1) x1 = ex;
+            if (ey < y0) y0 = ey;
+            if (ey > y1) y1 = ey;
+            for (int yy = ey - 2; yy <= ey + 2; yy++)
+                for (int xx = ex - 2; xx <= ex + 2; xx++)
+                    if (xx >= 0 && yy >= 0 && xx < gw && yy < gh && grid[yy * gw + xx] == 1)
+                        grid[yy * gw + xx] = 2, stack[sp++] = yy * gw + xx;
+        }
+        hudbox_t *o = &box[n++];
+        o->x = x0 * HUD_CELL, o->y = y0 * HUD_CELL;
+        o->w = (x1 + 1) * HUD_CELL > w ? w - o->x : (x1 + 1 - x0) * HUD_CELL;
+        o->h = (y1 + 1) * HUD_CELL > h ? h - o->y : (y1 + 1 - y0) * HUD_CELL;
+        int kk = k;
+        while (kk > 1 && (o->w * kk > w || o->h * kk > h)) kk--;
+        o->k = kk;
+        int dw = o->w * kk, dh = o->h * kk;
+        /* on an edge it is near (within 15% of the screen), else about its middle */
+        if (o->x < w * 15 / 100) o->dx = o->x * kk;
+        else if (o->x + o->w > w * 85 / 100) o->dx = w - (w - o->x) * kk;
+        else o->dx = o->x + o->w / 2 - dw / 2;
+        if (o->y < h * 15 / 100) o->dy = o->y * kk;
+        else if (o->y + o->h > h * 85 / 100) o->dy = h - (h - o->y) * kk;
+        else o->dy = o->y + o->h / 2 - dh / 2;
+        if (o->dx < 0) o->dx = 0;
+        if (o->dx + dw > w) o->dx = w - dw;
+        if (o->dy < 0) o->dy = 0;
+        if (o->dy + dh > h) o->dy = h - dh;
+    }
+    return n;
+}
+
 /* Upload only the scanned bands of the CPU layer, over a frame texture
  * cleared to transparent (the composite pass keeps what is opaque). */
 static int hw_upload(SDL_GPUCommandBuffer *cmd, const uint8_t *px, int w, int h, int pitch) {
     static band_t bands[4096 / HW_BAND + 1];
+    static hudbox_t box[HUD_MAXBOX];
     if ((h + HW_BAND - 1) / HW_BAND > (int)(sizeof bands / sizeof *bands)) return 0;
     int nb = hw_scan(px, w, h, pitch, bands);
+    int k = joyride_screen_hud_scale(h), nbox = k > 1 ? hud_boxes(px, w, h, pitch, bands, nb, k, box) : -1;
+    if (nbox >= 0) {                                  /* the pieces, larger, if they fit the buffer */
+        size_t need = 0;
+        for (int i = 0; i < nbox; i++) need += (size_t)box[i].w * box[i].k * (size_t)box[i].h * box[i].k * 4;
+        if (need > (size_t)w * h * 4) nbox = -1;
+    }
+    if (nbox >= 0) {
+        uint8_t *map = SDL_MapGPUTransferBuffer(g_gpu, g_upload, true);
+        if (!map) return 0;
+        size_t off = 0;
+        for (int i = 0; i < nbox; i++) {
+            const hudbox_t *b = &box[i];
+            int dw = b->w * b->k;
+            for (int y = 0; y < b->h; y++) {
+                const uint32_t *row = (const uint32_t *)(px + (size_t)(b->y + y) * (size_t)pitch) + b->x;
+                uint32_t *o = (uint32_t *)(map + off);
+                for (int x = 0; x < b->w; x++) {
+                    uint32_t v = row[x] == JOYRIDE_KEY ? 0 : row[x] | 0xFF000000u;
+                    for (int r = 0; r < b->k; r++) o[x * b->k + r] = v;
+                }
+                for (int r = 1; r < b->k; r++) memcpy(o + (size_t)r * dw, o, (size_t)dw * 4);
+                off += (size_t)dw * b->k * 4;
+            }
+        }
+        SDL_UnmapGPUTransferBuffer(g_gpu, g_upload);
+        SDL_GPUColorTargetInfo ct = { .texture = g_tex, .load_op = SDL_GPU_LOADOP_CLEAR,
+                                      .clear_color = { 0, 0, 0, 0 }, .store_op = SDL_GPU_STOREOP_STORE };
+        SDL_GPURenderPass *rp = SDL_BeginGPURenderPass(cmd, &ct, 1, NULL);
+        if (rp) SDL_EndGPURenderPass(rp);
+        SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cmd);
+        off = 0;
+        for (int i = 0; i < nbox; i++) {
+            const hudbox_t *b = &box[i];
+            int dw = b->w * b->k, dh = b->h * b->k;
+            SDL_GPUTextureTransferInfo src = { .transfer_buffer = g_upload, .offset = (Uint32)off,
+                                               .pixels_per_row = (Uint32)dw, .rows_per_layer = (Uint32)dh };
+            SDL_GPUTextureRegion dst = { .texture = g_tex, .x = (Uint32)b->dx, .y = (Uint32)b->dy,
+                                         .w = (Uint32)dw, .h = (Uint32)dh, .d = 1 };
+            SDL_UploadToGPUTexture(cp, &src, &dst, false);
+            off += (size_t)dw * dh * 4;
+        }
+        SDL_EndGPUCopyPass(cp);
+        return 1;
+    }
     uint8_t *map = SDL_MapGPUTransferBuffer(g_gpu, g_upload, true);
     if (!map) return 0;
     size_t off = 0;

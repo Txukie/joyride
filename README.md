@@ -45,6 +45,10 @@ out of sight at the screen's real edges. Menus stay 640×480.
   144 Hz), where the software renderer manages 23 at 2560×1440 and 17 at
   3440×1440. Vulkan only for now. See
   [`docs/exe-3dfx.md`](docs/exe-3dfx.md).
+* **HUD size** (GPU renderer) — the game draws its HUD at its 640×480
+  size whatever the screen; it is enlarged by whole times, piece by piece
+  (score and weapon stay in their corners, messages grow in place): auto
+  (×3 at 4K, ×2 at 1080p and 1440p) or ×1–×4.
 * **Textures** — bilinear filtering, the 3dfx version's look (default), or
   sharp. Filtered on the GPU like the 3dfx card did (Vulkan; on the CPU
   elsewhere); see [`docs/exe-3dfx.md`](docs/exe-3dfx.md). 32-bit colour only.
@@ -65,7 +69,7 @@ With the software renderer, up to 2560×1440 keeps the game's full speed
 with filtering, but with few frames between steps; the GPU renderer keeps
 the display's rate there.
 `JOYRIDE_RES=<w>x<h>|desktop|game`, `JOYRIDE_RENDERER=software|gpu`, `JOYRIDE_CONTROLLER=modern|classic`,
-`JOYRIDE_FILTER=0|1`, `JOYRIDE_SMOOTH=0|1` and `JOYRIDE_SCALE=<mode>` override
+`JOYRIDE_FILTER=0|1`, `JOYRIDE_SMOOTH=0|1`, `JOYRIDE_HUD=auto|1-4` and `JOYRIDE_SCALE=<mode>` override
 the file for one run.
 
 Not yet: Windows and macOS builds.
@@ -179,7 +183,7 @@ the next model the city has (all but the tank). See
 
 | Key | |
 | --- | --- |
-| F1 | settings: screen size, renderer, textures, motion, controller, scaling, fullscreen |
+| F1 | settings: screen size, renderer, HUD size, textures, motion, controller, scaling, fullscreen |
 | M | city map |
 | + / - | zoom the game in / out |
 | F6 | pause (the game's own) |

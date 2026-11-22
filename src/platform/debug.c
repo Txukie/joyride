@@ -44,6 +44,7 @@ typedef struct {
     int32_t cam_x, cam_y, cam_z, cam_scale, cam_zoom;
     float pad[6], share_f, share_b;
     uint32_t buttons;
+    int32_t chain_kind, chain_n, chain_t, score;   /* the kills-in-a-row the game counts (0x462000) */
 } step_t;
 
 typedef struct {
@@ -117,6 +118,11 @@ void joyride_debug_step(uint32_t word) {
     s->cam_x = (int32_t)MEM32(r + 0x1C), s->cam_y = (int32_t)MEM32(r + 0x20), s->cam_z = (int32_t)MEM32(r + 0x18);
     s->cam_scale = (int32_t)MEM32(r + 0x24), s->cam_zoom = (int32_t)MEM32(r + 0x28);
     joyride_pad_state(s->pad, &s->buttons, &s->share_f, &s->share_b);
+    /* the player's kills of one kind in a row (Gouranga: the 7th of kind 7,
+     * the Krishnas, each within 13 steps of the last) and the score */
+    uint32_t pl = 0x74F160u + 0x1BCu * (MEM32(0x74F83C) & 3);
+    s->chain_kind = (int32_t)MEM32(pl + 0x158), s->chain_n = (int16_t)MEM16(pl + 0x15C);
+    s->chain_t = (int16_t)MEM16(pl + 0x154), s->score = (int32_t)MEM32(pl + 0xDC);
 }
 
 /* each frame drawn (smooth.c, after the camera is placed for it), and each
@@ -171,16 +177,17 @@ void joyride_debug_report(void) {
     uint32_t n = g_ns < NSTEP ? g_ns : NSTEP;
     uint64_t t0 = n ? g_steps[(g_ns - n) % NSTEP].ns : 0;
     fprintf(f, "STEPS (ms from the first; positions 16.16 pixels, shown /65536)\n");
-    fprintf(f, "ms step dt | st id | ped x y h | car model x y z h turret force | cam x y z scale zoom | pad lx ly rx ry lt rt btn share f b | word\n");
+    fprintf(f, "ms step dt | st id | ped x y h | car model x y z h turret force | cam x y z scale zoom | pad lx ly rx ry lt rt btn share f b | word | kills kind n timer score\n");
     uint64_t prev = 0;
     for (uint32_t i = g_ns - n; i != g_ns; i++) {
         const step_t *s = &g_steps[i % NSTEP];
-        fprintf(f, "%.1f %u %.1f | %u %u | %.2f %.2f %d | %d %.2f %.2f %.2f %d %d %.3f | %d %d %d %d %d | %.2f %.2f %.2f %.2f %.2f %.2f %x %.2f %.2f | %08x\n",
+        fprintf(f, "%.1f %u %.1f | %u %u | %.2f %.2f %d | %d %.2f %.2f %.2f %d %d %.3f | %d %d %d %d %d | %.2f %.2f %.2f %.2f %.2f %.2f %x %.2f %.2f | %08x | %d %d %d %d\n",
                 (s->ns - t0) / 1e6, s->step, prev ? (s->ns - prev) / 1e6 : 0.0, s->state, s->id,
                 s->ped_x / 65536.0, s->ped_y / 65536.0, s->ped_h,
                 s->car_model, s->car_x / 65536.0, s->car_y / 65536.0, s->car_z / 65536.0, s->car_h, s->car_f0, s->car_force,
                 s->cam_x, s->cam_y, s->cam_z, s->cam_scale, s->cam_zoom,
-                s->pad[0], s->pad[1], s->pad[2], s->pad[3], s->pad[4], s->pad[5], s->buttons, s->share_f, s->share_b, s->word);
+                s->pad[0], s->pad[1], s->pad[2], s->pad[3], s->pad[4], s->pad[5], s->buttons, s->share_f, s->share_b, s->word,
+                s->chain_kind, s->chain_n, s->chain_t, s->score);
         prev = s->ns;
     }
     n = g_nf < NFRAME ? g_nf : NFRAME;
