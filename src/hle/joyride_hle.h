@@ -68,6 +68,7 @@ void joyride_debug_step(uint32_t word);
 void joyride_debug_frame(int kind, int32_t t, uint64_t slot_ns);
 void joyride_debug_report(void);
 void joyride_debug_give(void);
+void joyride_debug_tank_fire(uint32_t car);
 void joyride_screen_snapshot(const char *dir);     /* the next frame presented, saved there */                /* each pump: the pad in menus (pad.c) */
 void joyride_map_init(const char *install_root, const char *data_dir);
 void joyride_map_toggle(void);

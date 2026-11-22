@@ -264,8 +264,31 @@ static void tank_turret(uint32_t c, int was, int model) {
         MEM16(c + 0x12C) = 1;
     }
 }
+/* The tank's cannon (0x489300, from the car's step at 0x40A4C8 while its
+ * driver's fire flag, ped +0x46, is set) only fires while the driving
+ * player has a mission timer running (+0x196 of the player's record, the
+ * rampages' countdown): the game's own tanks are a rampage's. The tank the
+ * debug swap made fires at any time: in the car's step, before the game's
+ * tank code (the splice at 0x40A418, joyride_pad_throttle), the cannon is
+ * fired with the timer seen as running, and the fire flag taken. */
+static uint32_t g_tank;                  /* the car the swap made a tank (0: none) */
+void joyride_debug_tank_fire(uint32_t car) {
+    if (car != g_tank || MEM16(car + 0x22) != 0x25) return;
+    uint32_t ped = (uint32_t)(int32_t)(int16_t)MEM16(car + 2);
+    if ((int32_t)ped < 0 || !MEM8(0x7284E0u + ped * 256u + 0x46)) return;
+    int32_t player = (int16_t)hle_call_guest(0x464440, 1, &ped);
+    if (player < 0) return;
+    uint32_t timer = 0x74F2F6u + (uint32_t)player * 444u;
+    if (MEM16(timer) != 0xFFFF) return;                  /* running: the game's own way */
+    MEM16(timer) = 1;
+    uint32_t c = car;
+    hle_call_guest(0x489300, 1, &c);
+    MEM16(timer) = 0xFFFF;
+    MEM8(0x7284E0u + ped * 256u + 0x46) = 0;
+}
 static void swap_model(uint32_t c, int model) {
     tank_turret(c, (int16_t)MEM16(c + 0x22), model);
+    g_tank = model == 0x25 ? c : g_tank == c ? 0 : g_tank;
     int idx = model_info(model);
     uint32_t info = MEM32(MEM32(0x501574) + 4u * (uint32_t)idx);
     int old_len = (int16_t)MEM16(c + 0x36);

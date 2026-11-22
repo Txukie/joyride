@@ -234,6 +234,7 @@ static uint32_t g_share_car;
  * forward. The player's car, driven with the modern scheme, gets the share
  * its trigger asks for. */
 void joyride_pad_throttle(uint32_t car) {
+    joyride_debug_tank_fire(car);                           /* debug.c: the swap's tank */
     if (car != g_share_car) return;
     float *force = (float *)hle_ptr(car + 0x188);
     float k = *force > 0 ? g_share_fwd : g_share_back;
