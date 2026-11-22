@@ -70,7 +70,10 @@ void joyride_screen_snapshot(const char *dir);     /* the next frame presented, 
 void joyride_map_init(const char *install_root, const char *data_dir);
 void joyride_map_toggle(void);
 int  joyride_map_open(void);
-void joyride_camera_zoom(int dir);         /* the play view (display.c) */
+void joyride_camera_zoom(int dir);
+uint32_t joyride_zoom_height(uint32_t z);
+void joyride_smooth_offset(float *x, float *y);     /* the camera's rounding (smooth.c) */
+void joyride_hw_offset(float *x, float *y);         /* for the draw's quads (hwrender.c) */         /* the play view (display.c) */
 const uint8_t *joyride_map_picture(int *size, int *id);
 int  joyride_map_dots(float player[2], float obj[][2], int max);
 

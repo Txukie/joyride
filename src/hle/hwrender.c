@@ -76,8 +76,12 @@ void joyride_hw_mark(uint32_t surface, int band, int x0, int x1) {
 
 /* A draw starts: forget the last one's quads and put the key back where
  * the CPU drew, so whatever it draws now can be told from the world. */
+static float g_ox, g_oy;                           /* this draw's shift (smooth.c) */
+void joyride_hw_offset(float *x, float *y) { *x = g_ox, *y = g_oy; }
+
 void joyride_hw_begin(void) {
     g_nq = 0;
+    joyride_smooth_offset(&g_ox, &g_oy);
     int was = g_was_drawing;
     g_drawing = joyride_hwrender && joyride_screen_hwrender() && MEM32(0x504CB8) == 32;
     g_was_drawing = g_drawing;

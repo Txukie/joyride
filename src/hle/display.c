@@ -41,6 +41,7 @@
  * lifted code at it). Sizes up to 3840x2160 are accepted.
  * tools/postlift.py splices all of these into the lifted code.
  */
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -107,9 +108,10 @@ void joyride_mode_size(uint32_t wp, uint32_t hp) {
 }
 
 /* The camera: each view's scale (0x43BB30) is its width * zoom / 320. */
-/* joyride's camera zoom (d-pad up/down, + and -): a factor on the scale,
- * eased towards the level chosen each time the game sets the scale (each
- * step; smooth.c interpolates the scale between steps). */
+/* joyride's camera zoom (d-pad up/down, + and -): how much bigger the
+ * street is drawn, eased towards the level chosen each time the game sets
+ * the scale (each step); the renderer gets a camera moved to match
+ * (joyride_zoom_height). */
 static const float k_zoom[] = { 0.5f, 0.625f, 0.75f, 0.875f, 1.0f, 1.25f, 1.5f, 2.0f };
 #define ZOOM_DEFAULT 4
 static int g_zoom_i = ZOOM_DEFAULT;
@@ -128,7 +130,20 @@ uint32_t joyride_view_scale(uint32_t view_h, uint32_t zoom, uint32_t scale) {
     g_zoom += (want - g_zoom) * 0.3f;                  /* about a third of a second */
     if (g_zoom > want * 0.995f && g_zoom < want * 1.005f) g_zoom = want;
     int64_t s = (int64_t)((int64_t)view_h * 4 / 3) * (int32_t)zoom / 320;
-    return (uint32_t)(int32_t)(int64_t)((float)s * g_zoom);
+    if (g_zoom > 1.0f) s = (int64_t)((float)s * g_zoom);  /* closer: a narrower view */
+    return (uint32_t)(int32_t)s;
+}
+
+/* The camera's height as the renderer reads it (0x43B620, 0x43B780,
+ * 0x43B7E0). A block level L is drawn at scale / (height + 64 L); the street
+ * is drawn at level 5 (+0x140: measured, its 64-pixel tiles on screen). The zoom moves the camera so the street comes out
+ * that much smaller, and walls keep their perspective (scaling the scale
+ * down instead stretched them across the street). Closer, the camera would
+ * soon be under the roofs (it is only ~80 above them), so zooming in narrows
+ * the view instead (joyride_view_scale). */
+uint32_t joyride_zoom_height(uint32_t z) {
+    if (g_zoom >= 1.0f) return z;                      /* closer: the camera can't go below the roofs */
+    return (uint32_t)(int32_t)lrintf(((float)(int32_t)z + 320.0f) / g_zoom - 320.0f);
 }
 
 /* 0x43CA66 / 0x43BB62: the living area's half height (times 3, before

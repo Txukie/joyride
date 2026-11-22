@@ -139,6 +139,12 @@ TEXAFTER[0x0043BB62] = ("{ extern uint32_t joyride_live_half_width(uint32_t, uin
 # for this step is set (0x40A2E0: +0x188, from +0x14C when the throttle is
 # on, a share of it backwards); scale it by how far the trigger is pressed.
 TEXAFTER[0x0040A418] = ("{ extern void joyride_pad_throttle(uint32_t); joyride_pad_throttle(esi); }")
+# joyride's camera zoom (src/hle/display.c): where the renderer reads the
+# camera's height (0x43B620 the walls, 0x43B780 its copies for sprites,
+# 0x43B7E0 the lids), it gets one raised or lowered so the street comes out
+# at the zoomed size; the game's own camera is left alone.
+for _a, _r in ((0x0043B63E, "edi"), (0x0043B7A0, "ecx"), (0x0043B805, "esi")):
+    TEXAFTER[_a] = (f"{{ extern uint32_t joyride_zoom_height(uint32_t); {_r} = joyride_zoom_height({_r}); }}")
 ADDR = re.compile(r"/\* 0x([0-9A-F]{8}): ")
 
 GOTO = re.compile(r"goto L_([0-9A-F]{8});.*/\* 0x([0-9A-F]{8}): (j\w*|loop\w*) ")
@@ -166,7 +172,7 @@ def process(path: str) -> int:
         out.append(line)
         a = ADDR.search(line)
         if a and int(a.group(1), 16) in TEXAFTER and line.lstrip().startswith(("SET_HI8", "SET_LO8(eax, MEM8(0x503224))", "SET_LO8(eax, MEM8(0x502F34))", "RECOMP_CALL(sub_00430B20)", "RECOMP_CALL(sub_00430D40)",
-        "esp = esp - 0x10u", "esp = esp + 0x10u", "PUSH32(esp, esi)", "eax = MEM32(0x775580)", "edi = MEM32(0x4B8C58)", "eax = MEM32(esp + 0xC)", "esp = esp + 0x10u", "MEM32(ecx) = ebx", "MEM32(ecx + 0x24) = edx", "MEM8(ecx + 0x74F18C)", "edx =", "esi =", "PUSH32(esp, ebp)", "/* cmp MEM16(esi + 0x22), 0x25u */")):
+        "esp = esp - 0x10u", "esp = esp + 0x10u", "PUSH32(esp, esi)", "eax = MEM32(0x775580)", "edi = MEM32(0x4B8C58)", "eax = MEM32(esp + 0xC)", "esp = esp + 0x10u", "MEM32(ecx) = ebx", "MEM32(ecx + 0x24) = edx", "MEM8(ecx + 0x74F18C)", "edx =", "esi =", "PUSH32(esp, ebp)", "/* cmp MEM16(esi + 0x22), 0x25u */", "ecx = MEM32(eax + 0x18)", "edi = MEM32(ecx + 0x18)")):
             if True:
                 indent = line[:len(line) - len(line.lstrip())]
                 out.append(f"{indent}{TEXAFTER[int(a.group(1), 16)]}\n")

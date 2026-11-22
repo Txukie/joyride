@@ -19,7 +19,7 @@ struct Quad {
 layout(set = 2, binding = 0) uniform usampler2DArray pages;
 layout(set = 2, binding = 1) uniform sampler2D pals;
 layout(std430, set = 2, binding = 2) readonly buffer Quads { Quad q[]; };
-layout(set = 3, binding = 0) uniform Params { vec4 prm; };   // scale, filter (0/1)
+layout(set = 3, binding = 0) uniform Params { vec4 prm; };   // scale, filter (0/1), shift (x, y)
 
 layout(location = 0) flat in uint qi;
 layout(location = 0) out vec4 o;
@@ -35,7 +35,7 @@ void main() {
     // rasterizer counts them (a span's first pixel is its edge's x). Against
     // the software's own frame this leaves only single-pixel disagreements
     // on texel boundaries (its 16.16 steps against floats), none visible.
-    vec2 p = (gl_FragCoord.xy - 0.5) / prm.x;
+    vec2 p = (gl_FragCoord.xy - 0.5) / prm.x - prm.zw;   // where the game drew it (unshifted)
     float s = vert ? p.x : p.y, c = vert ? p.y : p.x; // along the scan axis, across the span
 
     float cmin = 1e9, cmax = -1e9;

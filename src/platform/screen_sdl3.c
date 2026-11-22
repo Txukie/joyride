@@ -557,8 +557,10 @@ static int hw_pass(SDL_GPUCommandBuffer *cmd, const joyride_quad *quads, int n, 
                                   .clear_color = { 0, 0, 0, 1 }, .store_op = SDL_GPU_STOREOP_STORE };
     SDL_GPURenderPass *rp = SDL_BeginGPURenderPass(cmd, &ct, 1, NULL);
     if (!rp) return 0;
-    float view[4] = { (float)w, (float)h, 0, 0 };
-    float prm[4] = { (float)scale, joyride_texfilter ? 1.0f : 0.0f, 0, 0 };
+    float ox, oy;                                        /* the camera's rounding (smooth.c) */
+    joyride_hw_offset(&ox, &oy);
+    float view[4] = { (float)w, (float)h, ox, oy };
+    float prm[4] = { (float)scale, joyride_texfilter ? 1.0f : 0.0f, ox, oy };
     if (n > 0) {
         SDL_BindGPUGraphicsPipeline(rp, g_hwpipe);
         SDL_BindGPUVertexStorageBuffers(rp, 0, &g_qbuf, 1);

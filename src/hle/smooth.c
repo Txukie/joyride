@@ -172,6 +172,8 @@ static int g_chas;
 
 static uint32_t view(void) { return 0x74F160u + MEM32(0x74F83C) * 444u; }
 
+static float g_off_x, g_off_y;              /* the camera's rounding, screen pixels */
+
 static void camera_apply(void) {
     uint32_t v = view();
     int32_t now[NCAM];
@@ -184,13 +186,32 @@ static void camera_apply(void) {
         if (g_chas && (abs(g_ccur[1] - g_cprev[1]) > 64 * 8 || abs(g_ccur[2] - g_cprev[2]) > 64 * 8)) g_chas = 0;
     }
     memcpy(g_csave, now, sizeof now);
+    g_off_x = g_off_y = 0;
     if (!g_chas) return;
     for (int i = 0; i < NCAM; i++) MEM32(v + (uint32_t)k_cam[i]) = (uint32_t)lerp(g_cprev[i], g_ccur[i], g_t);
+    /* The camera is in whole world pixels (+0x1C, +0x20): at 4K one is ~3
+     * screen pixels, so the scroll moved in uneven jumps and the sprites,
+     * placed finer, shook against it. What the rounding left is given to
+     * the GPU renderer, which shifts the world and the sprites by it
+     * (joyride_smooth_offset, hwrender.c), in screen pixels at street level:
+     * scale / (the renderer's camera height + 320); measured against the
+     * streets' tiles on screen (64 pixels each). */
+    {
+        double fx = g_cprev[1] + (double)(g_ccur[1] - g_cprev[1]) * g_t / 65536.0;
+        double fy = g_cprev[2] + (double)(g_ccur[2] - g_cprev[2]) * g_t / 65536.0;
+        double z = (int32_t)joyride_zoom_height(MEM32(v + 0x18)) + 320.0, sc = (int32_t)MEM32(v + 0x24);
+        double px = z > 0 ? sc / z : 0;
+        g_off_x = (float)(-(fx - (int32_t)MEM32(v + 0x1C)) * px);
+        g_off_y = (float)(-(fy - (int32_t)MEM32(v + 0x20)) * px);
+    }
     hle_call_guest(0x43B7E0, 0, NULL);                     /* the renderer's copies of the view */
     hle_call_guest(0x43B780, 0, NULL);
 }
 
+void joyride_smooth_offset(float *x, float *y) { *x = g_off_x, *y = g_off_y; }
+
 static void camera_restore(void) {
+    g_off_x = g_off_y = 0;
     if (!g_chas) return;
     uint32_t v = view();
     for (int i = 0; i < NCAM; i++) MEM32(v + (uint32_t)k_cam[i]) = (uint32_t)g_csave[i];
