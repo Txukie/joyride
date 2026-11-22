@@ -12,8 +12,9 @@
 //     chapters ([1] [2], [102] [103], [202] [203], each city its own
 //     style00N.g24) against London's four levels of one city ([1] to [4],
 //     1961 one, [1]); the text the front end shows for each slot
-//   * 1961's PLAYER_DRIVE_BY / _OFF made DONOWT (the script's no-op) until
-//     joyride has drive-bys
+//   * 1961's PLAYER_DRIVE_BY / _OFF, which the 2002 parser does not know, as
+//     DONOWT (the script's no-op) with a marker joyride acts on
+//     (src/platform/driveby.c)
 //   * London 1969's music: CD audio tracks 2 to 16, as Music/TrackN.wav.
 #include "games.h"
 
@@ -268,9 +269,14 @@ static std::vector<std::pair<int, std::string>> sections(const std::string &ini,
 
 // London's levels into the 2002 front end's slots; returns the text keys the
 // slots need, each with the key whose text it shows
-static std::vector<std::pair<std::string, std::string>> fitMissions(const fs::path &file, bool driveByOff) {
+static std::vector<std::pair<std::string, std::string>> fitMissions(const fs::path &file, bool driveBy) {
     std::string head, ini = readFile(file);
-    if (driveByOff) ini = std::regex_replace(ini, std::regex(R"(\bPLAYER_DRIVE_BY(_OFF)?\b)"), "DONOWT");
+    // the drive-by switch as DONOWT with joyride's marker in its last
+    // argument (src/platform/driveby.c): 31961 on, 31960 off
+    if (driveBy) {
+        ini = std::regex_replace(ini, std::regex(R"(\bPLAYER_DRIVE_BY_OFF[ \t]+-?\d+[ \t]+-?\d+[ \t]+-?\d+[ \t]+-?\d+[ \t]+-?\d+)"), "DONOWT 0 0 0 0 31960");
+        ini = std::regex_replace(ini, std::regex(R"(\bPLAYER_DRIVE_BY[ \t]+-?\d+[ \t]+-?\d+[ \t]+-?\d+[ \t]+-?\d+[ \t]+-?\d+)"), "DONOWT 0 0 0 0 31961");
+    }
     auto secs = sections(ini, head);
     std::map<int, std::string> by;
     for (auto &[n, body] : secs) by[n] = body;

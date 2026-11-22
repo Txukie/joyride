@@ -231,9 +231,12 @@ move, A chooses, B goes back, Start plays):
 
 London runs on the same recompiled 2002 executable: its files go over GTA's
 under GTA's names, and its levels into the slots the 2002 front end has
-(see `launcher/src/core/games.cpp`). London 1961's drive-bys are switched
-off for now (the 2002 executable has no drive-by). Each London game keeps its
-own saves and city maps (`JOYRIDE_PROFILE`).
+(see `launcher/src/core/games.cpp`). London 1961's drive-bys, which the 2002
+executable lacks, are joyride's: while a mission allows them, fire in a car
+shoots your weapon out of its side as London 1961's own executable does, and
+L1/R1 change the weapon instead of the radio station
+(`src/platform/driveby.c`). Each London game keeps its own saves and city
+maps (`JOYRIDE_PROFILE`), and the city map (M) shows London.
 
 ```bash
 cmake -S launcher -B build-launcher -G Ninja && cmake --build build-launcher

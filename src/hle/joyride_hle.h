@@ -69,6 +69,10 @@ void joyride_debug_frame(int kind, int32_t t, uint64_t slot_ns);
 void joyride_debug_report(void);
 void joyride_debug_give(void);
 void joyride_debug_tank_fire(uint32_t car);
+/* London 1961's drive-bys (src/platform/driveby.c) */
+void joyride_script_nop(uint32_t ebp, uint32_t esp);
+void joyride_driveby(uint32_t car);
+int joyride_driveby_on(void);
 void joyride_screen_snapshot(const char *dir);     /* the next frame presented, saved there */                /* each pump: the pad in menus (pad.c) */
 void joyride_map_init(const char *install_root, const char *data_dir);
 /* the picture around the menus on wide screens (src/platform/backdrop.c) */

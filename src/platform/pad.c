@@ -235,6 +235,7 @@ static uint32_t g_share_car;
  * its trigger asks for. */
 void joyride_pad_throttle(uint32_t car) {
     joyride_debug_tank_fire(car);                           /* debug.c: the swap's tank */
+    joyride_driveby(car);                                   /* driveby.c: London 1961's */
     if (car != g_share_car) return;
     float *force = (float *)hle_ptr(car + 0x188);
     float k = *force > 0 ? g_share_fwd : g_share_back;
@@ -267,8 +268,13 @@ static void driving_modern(const pad_t *p, uint32_t prev_buttons, uint32_t rec) 
     hold(C_JUMP, !!(p->buttons & BTN(SDL_GAMEPAD_BUTTON_SOUTH)));     /* handbrake */
     hold(C_ENTER, !!(p->buttons & BTN(SDL_GAMEPAD_BUTTON_NORTH)));
     if (!aiming) hold(C_SPECIAL, !!(p->buttons & BTN(SDL_GAMEPAD_BUTTON_EAST)));
-    hold(C_PREV, 0), hold(C_NEXT, 0);
     uint32_t pressed = p->buttons & ~prev_buttons;
+    if (joyride_driveby_on()) {                              /* London 1961's drive-bys: L1/R1 the weapon */
+        hold(C_PREV, !!(p->buttons & BTN(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)));
+        hold(C_NEXT, !!(p->buttons & BTN(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)));
+        return;
+    }
+    hold(C_PREV, 0), hold(C_NEXT, 0);
     if (pressed & BTN(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) joyride_radio_step(-1);
     if (pressed & BTN(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) joyride_radio_step(1);
 }

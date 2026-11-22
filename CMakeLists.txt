@@ -108,6 +108,7 @@ add_executable(joyride
     src/platform/map.c
     src/platform/debug.c
     src/platform/backdrop.c
+    src/platform/driveby.c
     $<TARGET_OBJECTS:joyride_gen>)
 target_include_directories(joyride PRIVATE src/hle)
 target_compile_options(joyride PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-format-truncation)
