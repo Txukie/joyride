@@ -59,11 +59,36 @@ static uint32_t g_ns, g_nf, g_step;
 
 static uint32_t rec(void) { return 0x74F160u + MEM32(0x74F83C) * 444u; }
 
+/* Cars that turn up above the street: every step each car's height is
+ * compared with the last; one set up anew (its place jumped) or risen by
+ * more than half a level is noted, with where it is and what drives it.
+ * Street level is z 255 (16.16 >> 16; smaller is higher). */
+#define NCARS 400
+#define NCAREV 128
+typedef struct { uint32_t step; int id, model, driver, f6, x, y, z, px, py, pz; } carev_t;
+static carev_t g_carev[NCAREV];
+static uint32_t g_ncarev;
+static int32_t g_cx[NCARS], g_cy[NCARS], g_cz[NCARS];
+static void watch_cars(void) {
+    for (int i = 0; i < NCARS; i++) {
+        uint32_t c = 0x4BE248u + (uint32_t)i * 688u;
+        int32_t x = (int32_t)MEM32(c + 0x250) >> 16, y = (int32_t)MEM32(c + 0x254) >> 16, z = (int32_t)MEM32(c + 0x258) >> 16;
+        int moved = abs(x - g_cx[i]) > 256 || abs(y - g_cy[i]) > 256;
+        if ((x || y) && z < 200 && (moved || g_cz[i] - z > 32)) {
+            carev_t *e = &g_carev[g_ncarev++ % NCAREV];
+            *e = (carev_t){ g_step, i, (int16_t)MEM16(c + 0x22), (int16_t)MEM16(c + 2), (int16_t)MEM16(c + 6), x, y, z,
+                            g_cx[i], g_cy[i], g_cz[i] };
+        }
+        g_cx[i] = x, g_cy[i] = y, g_cz[i] = z;
+    }
+}
+
 /* each game step (from the input reader, 0x433141) */
 void joyride_debug_step(uint32_t word) {
     step_t *s = &g_steps[g_ns++ % NSTEP];
     memset(s, 0, sizeof *s);
     uint32_t r = rec();
+    watch_cars();
     s->ns = SDL_GetTicksNS(), s->step = ++g_step, s->word = word ? MEM32(word) : 0;
     s->state = MEM32(r + 0xA4), s->id = MEM32(r + 0xA8) & 0xFFFF;
     if (s->state == 2) {
@@ -154,6 +179,13 @@ void joyride_debug_report(void) {
                 fr->step, fr->t / 65536.0, fr->slot_ns ? ((double)fr->slot_ns - (double)t0) / 1e6 : 0.0,
                 fr->cam_x, fr->cam_y, fr->cam_scale);
         prev = fr->ns;
+    }
+    fprintf(f, "\nCARS ABOVE THE STREET (appeared there, or rose; z 255 is street level, smaller is higher)\n");
+    fprintf(f, "step car model driver f6 | x y z | was x y z\n");
+    n = g_ncarev < NCAREV ? g_ncarev : NCAREV;
+    for (uint32_t i = g_ncarev - n; i != g_ncarev; i++) {
+        const carev_t *e = &g_carev[i % NCAREV];
+        fprintf(f, "%u %d %d %d %d | %d %d %d | %d %d %d\n", e->step, e->id, e->model, e->driver, e->f6, e->x, e->y, e->z, e->px, e->py, e->pz);
     }
     fclose(f);
     save_memory(dir);

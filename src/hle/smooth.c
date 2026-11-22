@@ -108,8 +108,12 @@ static obj_t *slot(uint32_t addr) {
     return &g_obj[h];
 }
 
-/* the most an object can move in a step and still be interpolated */
-#define JUMP (8 << 16)
+/* the most an object can move in a step and still be interpolated: more
+ * is a jump (spawned, reused, teleported). Cars at full speed cover 25-35
+ * pixels a step (a block is 64); at 8, as this was, a fast car was left at
+ * its step's place while the camera and the street moved smoothly, and it
+ * shook against them. */
+#define JUMP (128 << 16)
 
 /* object now (step g_step) -> where to draw it */
 static int track(uint32_t a, int32_t pos[3], uint16_t *ang) {
