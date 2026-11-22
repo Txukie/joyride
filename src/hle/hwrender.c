@@ -27,10 +27,13 @@
  * also keeps the page slots, palette slots and frozen pages shared here);
  * the shading table is [0x78C10C].
  *
- * Each draw (the game's own and smooth.c's) starts by clearing the surface
- * to a key colour; what the CPU still draws over it (HUD, text) is laid
- * over the GPU's world by the presenter (screen_sdl3.c, shaders/hwquad.*,
- * shaders/composite.frag).
+ * Each draw (the game's own and smooth.c's) starts with the surface all key
+ * colour; what the CPU still draws over it (HUD, text) is laid over the
+ * GPU's world by the presenter (screen_sdl3.c, shaders/hwquad.*,
+ * shaders/composite.frag). The presenter scans each frame for what the CPU
+ * drew, in bands of rows, uploads only that, and marks it here, so only
+ * that is put back to the key: the HUD's few corners, not the whole
+ * screen, three times over, every frame.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,18 +57,44 @@ static uint32_t surface(uint32_t *pitch) {
     return MEM32(0x503228);
 }
 
-/* A draw starts: forget the last one's quads and clear the surface to the
- * key, so whatever the CPU draws over it can be told from the world. */
+/* What the CPU drew over the key since the last clear, by bands of rows
+ * (the presenter scans each frame it gets, shown or not, and marks them):
+ * the next clear only has to put those back. A full clear when the surface
+ * is new, or the previous draw was not this renderer's. */
+#define BAND 64
+#define MAXBANDS 64
+static int g_dirty_x0[MAXBANDS], g_dirty_x1[MAXBANDS];   /* x1 < x0: clean */
+static uint32_t g_last_base, g_last_pitch;
+static int g_last_h, g_was_drawing;
+
+void joyride_hw_mark(int band, int x0, int x1) {
+    if (band < 0 || band >= MAXBANDS) return;
+    if (x0 < g_dirty_x0[band]) g_dirty_x0[band] = x0;
+    if (x1 > g_dirty_x1[band]) g_dirty_x1[band] = x1;
+}
+
+/* A draw starts: forget the last one's quads and put the key back where
+ * the CPU drew, so whatever it draws now can be told from the world. */
 void joyride_hw_begin(void) {
     g_nq = 0;
+    int was = g_was_drawing;
     g_drawing = joyride_hwrender && joyride_screen_hwrender() && MEM32(0x504CB8) == 32;
+    g_was_drawing = g_drawing;
     if (!g_drawing) return;
     int w, h;
     joyride_gbuf_dims(&w, &h);                     /* the surface's pitch in pixels, rows */
     uint32_t pitch, base = surface(&pitch);
-    if (!w || !h || !base || pitch != (uint32_t)w * 4) { g_drawing = 0; return; }
+    if (!w || !h || !base || pitch != (uint32_t)w * 4 || (h + BAND - 1) / BAND > MAXBANDS) { g_drawing = g_was_drawing = 0; return; }
     uint32_t *p = (uint32_t *)hle_ptr(base);
-    for (size_t i = 0, n = (size_t)w * (size_t)h; i < n; i++) p[i] = JOYRIDE_KEY;
+    int full = !was || base != g_last_base || pitch != g_last_pitch || h != g_last_h;
+    g_last_base = base, g_last_pitch = pitch, g_last_h = h;
+    for (int b = 0; b * BAND < h; b++) {
+        int x0 = full ? 0 : g_dirty_x0[b], x1 = full ? w - 1 : g_dirty_x1[b];
+        if (x1 >= x0)
+            for (int y = b * BAND; y < h && y < (b + 1) * BAND; y++)
+                for (uint32_t *q = p + (size_t)y * (size_t)w + x0, *e = q + (x1 - x0 + 1); q < e; q++) *q = JOYRIDE_KEY;
+        g_dirty_x0[b] = w, g_dirty_x1[b] = -1;
+    }
 }
 
 static joyride_quad *add(uint32_t page, uint32_t mode) {
@@ -148,3 +177,4 @@ int joyride_hw_quads(const joyride_quad **q) {
 }
 
 void joyride_hw_done(void) { g_drawing = 0, g_nq = 0; }
+int joyride_hw_active(void) { return g_drawing; }

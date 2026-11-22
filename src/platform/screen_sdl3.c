@@ -59,8 +59,6 @@ static SDL_GPUDevice *g_gpu;
 static SDL_GPUTexture *g_tex, *g_pre;    /* the frame; sharp mode's integer-scaled copy */
 static SDL_GPUTransferBuffer *g_upload;
 static int g_tw, g_th, g_pw, g_ph;       /* sizes they were made at */
-static uint32_t *g_bgra;                 /* the frame converted */
-static size_t g_bgra_n;
 static int g_src_w, g_src_h;             /* the game's picture */
 static SDL_FRect g_dst;                  /* where it went, in window pixels */
 static unsigned g_shown_seq = ~0u;
@@ -146,17 +144,10 @@ static uint32_t scan_of(SDL_Scancode s) {
 /* ---- frames ------------------------------------------------------------ */
 
 /* The game's pixels as BGRA8 (what a little-endian XRGB frame already is). */
-static int convert(const uint8_t *px, int w, int h, int pitch, int bpp, const uint32_t *pal) {
-    size_t n = (size_t)w * (size_t)h;
-    if (n > g_bgra_n) {
-        free(g_bgra);
-        g_bgra = (uint32_t *)malloc(n * 4);
-        g_bgra_n = g_bgra ? n : 0;
-        if (!g_bgra) return 0;
-    }
+static int convert_to(uint32_t *out, const uint8_t *px, int w, int h, int pitch, int bpp, const uint32_t *pal) {
     for (int y = 0; y < h; y++) {
         const uint8_t *row = px + (size_t)y * (size_t)pitch;
-        uint32_t *o = g_bgra + (size_t)y * (size_t)w;
+        uint32_t *o = out + (size_t)y * (size_t)w;
         switch (bpp) {
         case 32:                                 /* the hardware renderer's key: see-through */
             for (int x = 0; x < w; x++) {
@@ -185,6 +176,7 @@ static int convert(const uint8_t *px, int w, int h, int pitch, int bpp, const ui
     return 1;
 }
 
+
 static SDL_GPUTexture *make_tex(int w, int h, SDL_GPUTextureUsageFlags usage) {
     SDL_GPUTextureCreateInfo ti = {
         .type = SDL_GPU_TEXTURETYPE_2D, .format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
@@ -198,7 +190,7 @@ static int ensure_resources(int w, int h) {
     if (g_tex && g_tw == w && g_th == h) return 1;
     if (g_tex) SDL_ReleaseGPUTexture(g_gpu, g_tex);
     if (g_upload) SDL_ReleaseGPUTransferBuffer(g_gpu, g_upload);
-    g_tex = make_tex(w, h, SDL_GPU_TEXTUREUSAGE_SAMPLER);
+    g_tex = make_tex(w, h, SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET);   /* cleared by the hw path */
     SDL_GPUTransferBufferCreateInfo bi = { .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, .size = (Uint32)(w * h * 4) };
     g_upload = SDL_CreateGPUTransferBuffer(g_gpu, &bi);
     g_tw = w, g_th = h;
@@ -608,6 +600,80 @@ uint64_t joyride_screen_frame_ns(void) {
     return fps > 0 ? 1000000000ull / (uint64_t)fps : 0;
 }
 
+/* The hardware renderer's CPU layer: the surface is the key colour except
+ * where the CPU drew (HUD, text). Find that by bands of 64 rows (pairs of
+ * pixels compared at once), tell hwrender.c (its next clear only puts those
+ * back), and return each band's extent: only they are converted and sent. */
+#define HW_BAND 64
+typedef struct { int x0, x1; } band_t;
+static int hw_scan(const uint8_t *px, int w, int h, int pitch, band_t *bands) {
+    const uint64_t key2 = (uint64_t)JOYRIDE_KEY << 32 | JOYRIDE_KEY;
+    int nb = (h + HW_BAND - 1) / HW_BAND;
+    for (int b = 0; b < nb; b++) {
+        int x0 = w, x1 = -1;
+        for (int y = b * HW_BAND; y < h && y < (b + 1) * HW_BAND; y++) {
+            const uint32_t *row = (const uint32_t *)(px + (size_t)y * (size_t)pitch);
+            int i = 0;
+            if (x0 > 0) {                                /* from the left, up to what is known */
+                while (i + 2 <= x0 && i + 2 <= w) {
+                    uint64_t v;
+                    memcpy(&v, row + i, 8);
+                    if (v != key2) break;
+                    i += 2;
+                }
+                while (i < w && i < x0 && row[i] == JOYRIDE_KEY) i++;
+                if (i < x0 && i < w) x0 = i;
+            }
+            int j = w - 1;
+            while (j > x1 && row[j] == JOYRIDE_KEY) j--;
+            if (j > x1) x1 = j;
+        }
+        if (x1 >= x0) joyride_hw_mark(b, x0, x1);
+        if (bands) bands[b].x0 = x0, bands[b].x1 = x1;
+    }
+    return nb;
+}
+
+/* Upload only the scanned bands of the CPU layer, over a frame texture
+ * cleared to transparent (the composite pass keeps what is opaque). */
+static int hw_upload(SDL_GPUCommandBuffer *cmd, const uint8_t *px, int w, int h, int pitch) {
+    static band_t bands[4096 / HW_BAND + 1];
+    if ((h + HW_BAND - 1) / HW_BAND > (int)(sizeof bands / sizeof *bands)) return 0;
+    int nb = hw_scan(px, w, h, pitch, bands);
+    uint8_t *map = SDL_MapGPUTransferBuffer(g_gpu, g_upload, true);
+    if (!map) return 0;
+    size_t off = 0;
+    for (int b = 0; b < nb; b++) {
+        if (bands[b].x1 < bands[b].x0) continue;
+        int bw = bands[b].x1 - bands[b].x0 + 1;
+        for (int y = b * HW_BAND; y < h && y < (b + 1) * HW_BAND; y++) {
+            const uint32_t *row = (const uint32_t *)(px + (size_t)y * (size_t)pitch) + bands[b].x0;
+            uint32_t *o = (uint32_t *)(map + off);
+            for (int x = 0; x < bw; x++) o[x] = row[x] == JOYRIDE_KEY ? 0 : row[x] | 0xFF000000u;
+            off += (size_t)bw * 4;
+        }
+    }
+    SDL_UnmapGPUTransferBuffer(g_gpu, g_upload);
+    SDL_GPUColorTargetInfo ct = { .texture = g_tex, .load_op = SDL_GPU_LOADOP_CLEAR,
+                                  .clear_color = { 0, 0, 0, 0 }, .store_op = SDL_GPU_STOREOP_STORE };
+    SDL_GPURenderPass *rp = SDL_BeginGPURenderPass(cmd, &ct, 1, NULL);
+    if (rp) SDL_EndGPURenderPass(rp);
+    SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cmd);
+    off = 0;
+    for (int b = 0; b < nb; b++) {
+        if (bands[b].x1 < bands[b].x0) continue;
+        int bw = bands[b].x1 - bands[b].x0 + 1, y0 = b * HW_BAND, rows = (y0 + HW_BAND <= h ? HW_BAND : h - y0);
+        SDL_GPUTextureTransferInfo src = { .transfer_buffer = g_upload, .offset = (Uint32)off,
+                                           .pixels_per_row = (Uint32)bw, .rows_per_layer = (Uint32)rows };
+        SDL_GPUTextureRegion dst = { .texture = g_tex, .x = (Uint32)bands[b].x0, .y = (Uint32)y0,
+                                     .w = (Uint32)bw, .h = (Uint32)rows, .d = 1 };
+        SDL_UploadToGPUTexture(cp, &src, &dst, false);
+        off += (size_t)bw * (size_t)rows * 4;
+    }
+    SDL_EndGPUCopyPass(cp);
+    return 1;
+}
+
 static void present(int flip) {
     const uint8_t *px;
     const uint32_t *pal = NULL;
@@ -615,7 +681,10 @@ static void present(int flip) {
     unsigned seq = 0;
     if (!hle_dd_frame(&px, &w, &h, &pitch, &bpp, &pal, &seq) &&
         !hle_gdi_window_frame(&px, &w, &h, &pitch, &bpp, &seq)) return;
-    if (flip && joyride_smooth_skip()) return;           /* smooth.c draws this moment itself */
+    if (flip && joyride_smooth_skip()) {                 /* smooth.c draws this moment itself */
+        if (joyride_hw_active() && bpp == 32) hw_scan(px, w, h, pitch, NULL);   /* what to clear next */
+        return;
+    }
     uint32_t now = hle_ticks_ms();
     if (!flip && !g_force && seq == g_shown_seq && now - g_last_present < 250) return;
     if (!flip && !g_force && now - g_last_present < 15) return;
@@ -624,22 +693,29 @@ static void present(int flip) {
     g_src_w = w, g_src_h = h;
     if (hle_screen_frame_hook) hle_screen_frame_hook(px, w, h, pitch, bpp);
     if (flip) pace();
-    if (!g_gpu || !convert(px, w, h, pitch, bpp, pal) || !ensure_resources(w, h)) return;
-    joyride_overlay_draw(g_bgra, w, h);
-
-    void *map = SDL_MapGPUTransferBuffer(g_gpu, g_upload, true);
-    if (!map) return;
-    memcpy(map, g_bgra, (size_t)w * (size_t)h * 4);
-    SDL_UnmapGPUTransferBuffer(g_gpu, g_upload);
-
-    SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(g_gpu);
-    if (!cmd) return;
-    SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cmd);
-    SDL_GPUTextureTransferInfo src = { .transfer_buffer = g_upload, .offset = 0,
-                                       .pixels_per_row = (Uint32)w, .rows_per_layer = (Uint32)h };
-    SDL_GPUTextureRegion dst = { .texture = g_tex, .w = (Uint32)w, .h = (Uint32)h, .d = 1 };
-    SDL_UploadToGPUTexture(cp, &src, &dst, true);
-    SDL_EndGPUCopyPass(cp);
+    if (!g_gpu || !ensure_resources(w, h)) return;
+    SDL_GPUCommandBuffer *cmd;
+    if (joyride_hw_active() && bpp == 32 && !joyride_overlay_open()) {
+        /* the hardware renderer: only the CPU's few pixels go up */
+        if (!(cmd = SDL_AcquireGPUCommandBuffer(g_gpu))) return;
+        if (!hw_upload(cmd, px, w, h, pitch)) { SDL_SubmitGPUCommandBuffer(cmd); return; }
+    } else {
+        /* converted straight into the upload buffer, the overlay drawn on it */
+        uint32_t *map = SDL_MapGPUTransferBuffer(g_gpu, g_upload, true);
+        if (!map) return;
+        int ok = convert_to(map, px, w, h, pitch, bpp, pal);
+        if (ok) joyride_overlay_draw(map, w, h);
+        SDL_UnmapGPUTransferBuffer(g_gpu, g_upload);
+        if (!ok) return;
+        if (joyride_hw_active() && bpp == 32) hw_scan(px, w, h, pitch, NULL);
+        if (!(cmd = SDL_AcquireGPUCommandBuffer(g_gpu))) return;
+        SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cmd);
+        SDL_GPUTextureTransferInfo src = { .transfer_buffer = g_upload, .offset = 0,
+                                           .pixels_per_row = (Uint32)w, .rows_per_layer = (Uint32)h };
+        SDL_GPUTextureRegion dst = { .texture = g_tex, .w = (Uint32)w, .h = (Uint32)h, .d = 1 };
+        SDL_UploadToGPUTexture(cp, &src, &dst, true);
+        SDL_EndGPUCopyPass(cp);
+    }
 
     SDL_GPUTexture *pic = g_tex;                         /* what goes to the window */
     int pw = w, ph = h;                                  /* its size */

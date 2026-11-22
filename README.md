@@ -39,8 +39,9 @@ size, F12 or Esc closes. They are kept in `~/.local/share/joyride/joyride.cfg`.
 * **Renderer** — software (default: the game's own rasterizer, as
   released) or GPU: the world drawn by the graphics card the way the 3dfx
   version did it, the CPU keeping only the geometry. Same picture; it keeps
-  the full frame rate at sizes the software renderer can't (2560×1440 at 60
-  fps, 3440×1440 at 55, against 21 and 18). Vulkan only for now. See
+  the display's rate at any size (60 fps at 60 Hz up to 3440×1440, ~140 at
+  144 Hz), where the software renderer manages 23 at 2560×1440 and 17 at
+  3440×1440. Vulkan only for now. See
   [`docs/exe-3dfx.md`](docs/exe-3dfx.md).
 * **Textures** — bilinear filtering, the 3dfx version's look (default), or
   sharp. Filtered on the GPU like the 3dfx card did (Vulkan; on the CPU

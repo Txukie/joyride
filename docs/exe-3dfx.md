@@ -165,18 +165,25 @@ is not see-through, the 3dfx card's alpha test); blended quads at half
 alpha, because the game's blend table at `[0x78C108]` is an exact average
 (`T[src][dst] = (src + dst) / 2`, checked against a dump of it).
 
-Each draw starts by filling the surface with a key colour (`0xA5FF00FF`, a
-top byte no game colour has). What the CPU still draws (HUD, text, the
-HUD's scaled blits) lands on it; the presenter turns the key into alpha 0
-and `shaders/composite.frag` lays the rest over the GPU's world.
+Each draw starts with the surface all key colour (`0xA5FF00FF`, a top byte
+no game colour has). What the CPU still draws (HUD, text, the HUD's scaled
+blits) lands on it, and `shaders/composite.frag` lays it over the GPU's
+world. That layer is a few corners of the screen, so it is handled in
+bands of 64 rows: the presenter scans each frame (pairs of pixels at a
+time) for each band's extent of non-key pixels, converts and uploads only
+those onto a frame texture the GPU clears to transparent, and tells
+`hwrender.c`, whose next clear puts back just those. Before this the whole
+surface was cleared, converted and copied every frame (60 MB of memory
+traffic a frame at 3440×1440), which was most of the frame time.
 
 Against the software's own frame (same moment, sharp textures) every
 texture and edge matches; about 10% of pixels differ by a texel boundary
 one pixel over, the software stepping in 16.16 fixed point through a
 reciprocal table where the GPU interpolates floats. With smooth motion and
-filtering: 1024×768 60 fps either way; 2560×1440 60 fps (software 21);
-3440×1440 55 fps with the game at full speed (software 18, the game slowed
-to 20.8 steps a second).
+filtering, the GPU renderer holds the display's rate at every size: 60 fps
+at a 60 Hz cap up to 3440×1440, 137–144 at a 144 Hz cap. The software
+renderer: 60 at 1024×768, 23 at 2560×1440, 17 at 3440×1440 (and the game
+slows to 22.4 steps a second there).
 
 Not done yet:
 
