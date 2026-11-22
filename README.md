@@ -65,6 +65,13 @@ out of sight at the screen's real edges. Menus stay 640×480.
   nearest, integer.
 * **Fullscreen** (also F11 or Alt+Enter).
 
+**Menus on wide screens.** The menus stay 640×480; on a screen that is not
+4:3 joyride can fill the bars with your own wide picture made to go around
+the menu background (its middle covered by the menu): put it in
+`~/.local/share/joyride/extracted/menu/` as `delta.png`, or `delta.jpg`
+(needs the ffmpeg libraries). It is cropped about its middle to the
+window's shape, so one 21:9 picture serves 16:10, 16:9 and 21:9.
+
 With the software renderer, up to 2560×1440 keeps the game's full speed
 with filtering, but with few frames between steps; the GPU renderer keeps
 the display's rate there.

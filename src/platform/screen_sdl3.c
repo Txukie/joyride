@@ -206,6 +206,54 @@ static void place(int w, int h, int sw, int sh) {
     g_dst.x = (float)floor((sw - g_dst.w) / 2), g_dst.y = (float)floor((sh - g_dst.h) / 2);
 }
 
+/* The menus on a screen that is not 4:3: the player's wide picture
+ * (backdrop.c) fills the window behind them, cropped about its middle to
+ * the window's shape; the menu is drawn over it as ever. Made a texture
+ * the first time it is needed. */
+static SDL_GPUTexture *g_back;
+static int g_back_w, g_back_h, g_back_tried;
+static int backdrop_pass(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swap, int sw, int sh, int w, int h) {
+    if (w != 640 || h != 480) return 0;                  /* menus only: in play the picture fills the window */
+    if (abs(sw * 3 - sh * 4) <= sh / 50) return 0;       /* 4:3 already */
+    if (!g_back && !g_back_tried) {
+        g_back_tried = 1;
+        const uint8_t *px;
+        int bw, bh;
+        if (!joyride_backdrop(&px, &bw, &bh)) return 0;
+        SDL_GPUTexture *t = make_tex(bw, bh, SDL_GPU_TEXTUREUSAGE_SAMPLER);
+        SDL_GPUTransferBufferCreateInfo ti = { .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, .size = (Uint32)bw * (Uint32)bh * 4 };
+        SDL_GPUTransferBuffer *tb = t ? SDL_CreateGPUTransferBuffer(g_gpu, &ti) : NULL;
+        uint8_t *map = tb ? SDL_MapGPUTransferBuffer(g_gpu, tb, false) : NULL;
+        if (!map) {
+            if (tb) SDL_ReleaseGPUTransferBuffer(g_gpu, tb);
+            if (t) SDL_ReleaseGPUTexture(g_gpu, t);
+            return 0;
+        }
+        memcpy(map, px, (size_t)bw * bh * 4);
+        SDL_UnmapGPUTransferBuffer(g_gpu, tb);
+        SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cmd);
+        SDL_GPUTextureTransferInfo src = { .transfer_buffer = tb, .pixels_per_row = (Uint32)bw, .rows_per_layer = (Uint32)bh };
+        SDL_GPUTextureRegion dst = { .texture = t, .w = (Uint32)bw, .h = (Uint32)bh, .d = 1 };
+        SDL_UploadToGPUTexture(cp, &src, &dst, false);
+        SDL_EndGPUCopyPass(cp);
+        SDL_ReleaseGPUTransferBuffer(g_gpu, tb);
+        g_back = t, g_back_w = bw, g_back_h = bh;
+    }
+    if (!g_back) return 0;
+    double s = fmax((double)sw / g_back_w, (double)sh / g_back_h);   /* covers the window */
+    double cw = sw / s, ch = sh / s;
+    SDL_GPUBlitInfo bi;
+    SDL_zero(bi);
+    bi.source.texture = g_back;
+    bi.source.x = (Uint32)((g_back_w - cw) / 2), bi.source.y = (Uint32)((g_back_h - ch) / 2);
+    bi.source.w = (Uint32)cw, bi.source.h = (Uint32)ch;
+    bi.destination.texture = swap, bi.destination.w = (Uint32)sw, bi.destination.h = (Uint32)sh;
+    bi.load_op = SDL_GPU_LOADOP_DONT_CARE;
+    bi.filter = SDL_GPU_FILTER_LINEAR;
+    SDL_BlitGPUTexture(cmd, &bi);
+    return 1;
+}
+
 static void blit(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *src, int sw, int sh,
                  SDL_GPUTexture *dst, SDL_FRect d, SDL_GPUFilter filter, int clear) {
     SDL_GPUBlitInfo bi;
@@ -1044,6 +1092,7 @@ static void present(int flip) {
     if (!ok || !swap || !sw || !sh) { SDL_SubmitGPUCommandBuffer(cmd); return; }
 
     place(w, h, (int)sw, (int)sh);                       /* the game's size sets the shape */
+    int clear = !backdrop_pass(cmd, swap, (int)sw, (int)sh, w, h);
     if (g_mode == MODE_SHARP && (g_dst.w > pw || g_dst.h > ph)) {
         int k = (int)ceil(fmax(g_dst.w / pw, g_dst.h / ph));
         if (!g_pre || g_pw != pw * k || g_ph != ph * k) {
@@ -1053,13 +1102,13 @@ static void present(int flip) {
         }
         if (g_pre) {
             blit(cmd, pic, pw, ph, g_pre, (SDL_FRect){ 0, 0, (float)g_pw, (float)g_ph }, SDL_GPU_FILTER_NEAREST, 0);
-            blit(cmd, g_pre, g_pw, g_ph, swap, g_dst, SDL_GPU_FILTER_LINEAR, 1);
+            blit(cmd, g_pre, g_pw, g_ph, swap, g_dst, SDL_GPU_FILTER_LINEAR, clear);
         } else {
-            blit(cmd, pic, pw, ph, swap, g_dst, SDL_GPU_FILTER_LINEAR, 1);
+            blit(cmd, pic, pw, ph, swap, g_dst, SDL_GPU_FILTER_LINEAR, clear);
         }
     } else {
         SDL_GPUFilter f = g_mode == MODE_SMOOTH || g_mode == MODE_SHARP ? SDL_GPU_FILTER_LINEAR : SDL_GPU_FILTER_NEAREST;
-        blit(cmd, pic, pw, ph, swap, g_dst, f, 1);
+        blit(cmd, pic, pw, ph, swap, g_dst, f, clear);
     }
     SDL_SubmitGPUCommandBuffer(cmd);
 }
