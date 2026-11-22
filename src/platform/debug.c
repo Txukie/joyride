@@ -235,10 +235,12 @@ static int next_model(int cur) {
  * world's object lists (0x436C30), and a second time links it into itself
  * (the game hung). So only what depends on the model is done again, as
  * 0x4067C0 does it: the dimensions and the info, the sprite, the body's
- * corners (0x434300). */
+ * corners (0x434300), the driving's numbers for the model (0x460AD0). */
+static uint32_t f2u(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
 static void swap_model(uint32_t c, int model) {
     int idx = model_info(model);
     uint32_t info = MEM32(MEM32(0x501574) + 4u * (uint32_t)idx);
+    int old_len = (int16_t)MEM16(c + 0x36);
     MEM32(c + 0x2AC) = info;
     MEM16(c + 0x20) = MEM16(info + 0xE), MEM16(c + 0x32) = MEM16(info + 0x10);
     MEM16(c + 0x28) = model == 4 ? 0x3C : MEM16(info + 0xA);
@@ -255,11 +257,34 @@ static void swap_model(uint32_t c, int model) {
     MEM32(c + 0x108) = model == 0x2F ? 0x20000 : model == 0x25 ? 0x40000 : 0x30000;
     MEM16(c + 0xEE) = model == 0x13 ? 1 : model == 1 ? 2 : model == 0x2B ? 3 : 0;
     MEM16(c + 0xCE) = (uint16_t)((MEM8(c + 0x28) & 7) - 4);
+    /* the two axle points the driving works from (0x14/0x18 and 0xAC/0xB0),
+     * half a length ahead of and behind the middle as 0x4067C0 puts them:
+     * moved apart or together for the new length, about their middle */
+    int new_len = (int16_t)MEM16(c + 0x36);
+    if (old_len != 0 && new_len != old_len) {
+        int64_t ax = (int32_t)MEM32(c + 0x14), ay = (int32_t)MEM32(c + 0x18);
+        int64_t bx = (int32_t)MEM32(c + 0xAC), by = (int32_t)MEM32(c + 0xB0);
+        int64_t mx = (ax + bx) / 2, my = (ay + by) / 2;
+        int64_t hx = (bx - ax) / 2 * new_len / old_len, hy = (by - ay) / 2 * new_len / old_len;
+        MEM32(c + 0x14) = (uint32_t)(mx - hx), MEM32(c + 0x18) = (uint32_t)(my - hy);
+        MEM32(c + 0xAC) = (uint32_t)(mx + hx), MEM32(c + 0xB0) = (uint32_t)(my + hy);
+    }
     /* the body's corners, from the new size */
     uint32_t a[8] = { MEM32(c + 0x250), MEM32(c + 0x254), MEM32(c + 0x258), MEM16(c + 0x8A), MEM16(c + 0x8C),
                       MEM16(c + 0x268), MEM16(c + 0x30), c + 0x1DC };
     for (int i = 3; i < 7; i++) a[i] = (uint32_t)(int32_t)(int16_t)a[i];
     hle_call_guest(0x434300, 8, a);
+    /* and the copy of them the driving keeps from the step before (0x405A80) */
+    uint32_t self = c;
+    hle_call_guest(0x405A80, 1, &self);
+    /* the driving's numbers for the model (0x460AD0, without its zeroing of
+     * the motion): left as the old model's, a long car is driven with a short
+     * one's and is thrown about as soon as it turns */
+    MEM32(c + 0x1B8) = f2u((float)(int8_t)MEM8(info + 0x76));
+    MEM32(c + 0x1BC) = f2u((float)(int8_t)MEM8(info + 0x77));
+    MEM32(c + 0x1B4) = f2u((float)(int32_t)MEM32(info + 0x78));
+    MEM32(c + 0x1B0) = MEM32(info + 0x7C);
+    MEM32(c + 0x14C) = MEM32(info + 0x80);
 }
 
 void joyride_debug_give(void) {
