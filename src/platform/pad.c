@@ -36,7 +36,7 @@
  *           the turret (turret() below).
  *   classic The game's tank controls on the pad: left stick steers and
  *           its up/down (or R2/L2) go forward/back, same buttons.
- * Start: the game's own pause (F6). Select: the city map. D-pad up and
+ * Start: the pause menu (continue, save, quit; overlay.c). Select: the city map. D-pad up and
  * down zoom the game in and out (display.c); left and right, in a car,
  * change the radio station. The back buttons (SDL's left paddles: L4 and
  * L5 on a Steam Controller or Steam Deck) are for debugging (debug.c):
@@ -298,10 +298,15 @@ void joyride_pad_state(float axes[6], uint32_t *buttons, float *share_f, float *
     *buttons = g_last_pad.buttons, *share_f = g_share_fwd, *share_b = g_share_back;
 }
 
+int joyride_pad_in_play(void) {                           /* the game read its controls lately */
+    return g_play_ms && (uint32_t)SDL_GetTicks() - g_play_ms < 300;
+}
+
 void joyride_pad_input(uint32_t word) {
     static uint32_t prev;
     joyride_debug_step(word);                               /* debug.c's record */
     g_play_ms = SDL_GetTicks() ? (uint32_t)SDL_GetTicks() : 1;
+    joyride_savegame_step();                                /* a level just started: its save (savegame.c) */
     pad_t p;
     read_pad(&p);
     g_share_car = 0;                                        /* set again below while driving */
@@ -313,11 +318,9 @@ void joyride_pad_input(uint32_t word) {
     if (!joyride_controls_modern) classic(&p);
     else if (on_foot) on_foot_modern(&p, rec);
     else driving_modern(&p, rec);
-    /* Start: the game's pause, F6 (0x430DC0 key 0x40: 0x481510 shows
-     * "paused", a second press resumes), through the keyboard's path */
-    uint32_t pressed = p.buttons & ~prev, released = prev & ~p.buttons;
-    if (pressed & BTN(SDL_GAMEPAD_BUTTON_START)) joyride_screen_key(SDL_SCANCODE_F6, 1);
-    if (released & BTN(SDL_GAMEPAD_BUTTON_START)) joyride_screen_key(SDL_SCANCODE_F6, 0);
+    /* Start: the pause menu (continue, save, quit; overlay.c) */
+    uint32_t pressed = p.buttons & ~prev;
+    if (pressed & BTN(SDL_GAMEPAD_BUTTON_START)) joyride_pause_toggle();
     if (pressed & BTN(SDL_GAMEPAD_BUTTON_BACK)) joyride_map_toggle();      /* Select: the map (map.c) */
     /* d-pad up / down: zoom the game in / out (display.c) */
     if (pressed & BTN(SDL_GAMEPAD_BUTTON_DPAD_UP)) joyride_camera_zoom(+1);

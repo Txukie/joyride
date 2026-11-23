@@ -70,6 +70,15 @@ out of sight at the screen's real edges. Menus stay 640×480.
   with a bomb fitted, where fire is the bomb's. In a network game
   the host's choice is everyone's, for the whole game.
 
+**Pause menu and saving (Start, or F6).** GTA never let you save; joyride
+does. In play, Start (F6 on the keyboard) pauses with *Continue*, *Save game*
+and *Quit* (the level ends, as with the game's own Esc). One save per
+character and level (each city's chapter), in
+`~/.local/share/joyride/saves/`: your score and its multiplier and your
+weapons' ammunition. Starting that level again puts them back, always at
+the level's spawn point, with no wanted level and nothing broken. Mission
+progress is next (`src/platform/savegame.c`). Not in network games.
+
 **Menus on wide screens.** The menus stay 640×480; on a screen that is not
 4:3 joyride can fill the bars with your own wide picture made to go around
 the menu background (its middle covered by the menu): put it in
@@ -141,8 +150,8 @@ you aim doesn't move.
 | L1 / R1 | previous / next weapon (for drive-bys) |
 | D-pad left / right | previous / next radio station |
 
-**Both:** Start pauses the game (its own pause, as F6 does; again to
-resume); Select shows the city map; d-pad up / down zoom the game in and
+**Both:** Start opens the pause menu (continue, save, quit; F6 on the
+keyboard); Select shows the city map; d-pad up / down zoom the game in and
 out (from twice as close to twice as far; + and - on the keyboard);
 L3+R3 opens the settings; the left back buttons (L4 / L5 on a Steam
 Controller or Steam Deck) are the debugging keys below. In the
@@ -200,7 +209,7 @@ the next model the city has (all but the tank). See
 | F1 | settings: screen size, renderer, HUD size, textures, motion, controller, drive-bys, scaling, fullscreen |
 | M | city map |
 | + / - | zoom the game in / out |
-| F6 | pause (the game's own) |
+| F6 | the pause menu: continue, save, quit |
 | F7 | debug report (as L4) |
 | F8 | all weapons, next vehicle (as L5) |
 | F11, Alt+Enter | fullscreen |

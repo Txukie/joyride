@@ -1020,6 +1020,7 @@ static void present(int flip) {
     unsigned seq = 0;
     if (!hle_dd_frame(&px, &w, &h, &pitch, &bpp, &pal, &seq) &&
         !hle_gdi_window_frame(&px, &w, &h, &pitch, &bpp, &seq)) return;
+    if (bpp != 32) joyride_savegame_menus();             /* the game's menus (16 bits): a level starts afresh */
     if (flip && joyride_smooth_skip()) {                 /* smooth.c draws this moment itself */
         if (joyride_hw_active() && bpp == 32) hw_scan(px, w, h, pitch, NULL);   /* what to clear next */
         return;
@@ -1175,7 +1176,7 @@ static void key_event(SDL_Scancode sc, int down, int repeat, SDL_Keymod mod) {
         }
         return;
     }
-    if (sc == SDL_SCANCODE_F1 || joyride_overlay_open()) {
+    if (sc == SDL_SCANCODE_F1 || sc == SDL_SCANCODE_F6 || joyride_overlay_open()) {   /* F6 in play: the pause menu */
         if (joyride_overlay_key((int)sc, down, repeat)) return;
     }
     if (sc == SDL_SCANCODE_F7 || sc == SDL_SCANCODE_F8) {   /* debugging (debug.c) */

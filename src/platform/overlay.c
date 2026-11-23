@@ -127,6 +127,42 @@ static int size_index(int w, int h) {
 
 int joyride_overlay_open(void) { return g_open; }
 
+/* ---- the pause menu: Start or F6 in play ------------------------------------
+ * The game held as for the settings (joyride_safe_point); Continue, Save
+ * (savegame.c; not in a network game) and Quit, which gives the game its
+ * own Esc once play resumes and then Enter to its "Ya want out?": the level
+ * ends and its results show. */
+enum { P_CONTINUE, P_SAVE, P_QUIT, P_COUNT };
+static int g_pause, g_psel, g_quit;
+static char g_pmsg[64];
+
+void joyride_pause_toggle(void) {
+    if (g_open && g_pause) { g_open = g_pause = 0; joyride_screen_refresh(); return; }
+    if (g_open || !joyride_pad_in_play()) return;
+    g_open = g_pause = 1, g_psel = P_CONTINUE, g_pmsg[0] = 0;
+    joyride_screen_refresh();
+}
+
+static int pause_key(int sc) {
+    switch (sc) {
+    case SDL_SCANCODE_ESCAPE: case SDL_SCANCODE_F6: g_open = g_pause = 0; break;
+    case SDL_SCANCODE_UP:
+        do g_psel = (g_psel + P_COUNT - 1) % P_COUNT; while (g_psel == P_SAVE && !joyride_savegame_can_save());
+        break;
+    case SDL_SCANCODE_DOWN:
+        do g_psel = (g_psel + 1) % P_COUNT; while (g_psel == P_SAVE && !joyride_savegame_can_save());
+        break;
+    case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER: case SDL_SCANCODE_SPACE:
+        if (g_psel == P_CONTINUE) g_open = g_pause = 0;
+        else if (g_psel == P_SAVE) joyride_savegame_save(g_pmsg, sizeof g_pmsg);
+        else g_open = g_pause = 0, g_quit = 1;
+        break;
+    default: break;
+    }
+    joyride_screen_refresh();
+    return 1;
+}
+
 static void set_open(int on) {
     g_open = on;
     if (on) {
@@ -197,11 +233,16 @@ static void apply_size(void) {
 
 int joyride_overlay_key(int sc, int down, int repeat) {
     if (sc == SDL_SCANCODE_F1) {
-        if (down && !repeat) set_open(!g_open);
+        if (down && !repeat && !g_pause) set_open(!g_open);
+        return 1;
+    }
+    if (sc == SDL_SCANCODE_F6 && !g_open && joyride_pad_in_play()) {   /* the game's pause key: ours */
+        if (down && !repeat) joyride_pause_toggle();
         return 1;
     }
     if (!g_open) return 0;
     if (!down) return 0;                         /* key-ups reach the game: nothing stays held */
+    if (g_pause) return pause_key(sc);
     switch (sc) {
     case SDL_SCANCODE_ESCAPE: set_open(0); break;
     case SDL_SCANCODE_UP: g_sel = (g_sel + ITEM_COUNT - 1) % ITEM_COUNT; break;
@@ -226,6 +267,33 @@ static void size_name(int i, char *out, size_t n) {
     else snprintf(out, n, "%d x %d", g_sizes[i][0], g_sizes[i][1]);
 }
 
+static void draw_pause(SDL_Renderer *r, float vw, float vh) {
+    const float pw = 30 * 8, ph = (P_COUNT + 6) * 12;
+    SDL_FRect panel = { (vw - pw) / 2, (vh - ph) / 2, pw, ph };
+    SDL_SetRenderDrawColor(r, 16, 16, 24, 235);
+    SDL_RenderFillRect(r, &panel);
+    SDL_SetRenderDrawColor(r, 230, 200, 40, 255);
+    SDL_RenderRect(r, &panel);
+    float x = panel.x + 12, y = panel.y + 10;
+    SDL_RenderDebugText(r, x, y, "Paused");
+    y += 20;
+    static const char *const label[P_COUNT] = { "Continue", "Save game", "Quit" };
+    int can = joyride_savegame_can_save();
+    for (int i = 0; i < P_COUNT; i++, y += 12) {
+        if (i == g_psel) {
+            SDL_FRect bar = { panel.x + 4, y - 2, pw - 8, 12 };
+            SDL_SetRenderDrawColor(r, 70, 60, 10, 255);
+            SDL_RenderFillRect(r, &bar);
+        }
+        int off = i == P_SAVE && !can;
+        SDL_SetRenderDrawColor(r, off ? 110 : 255, off ? 110 : 255, off ? 110 : 255, 255);
+        SDL_RenderDebugText(r, x, y, i == P_SAVE && off && joyride_net_driveby() >= 0 ? "Save game (not online)" : label[i]);
+    }
+    y += 8;
+    SDL_SetRenderDrawColor(r, 230, 200, 40, 255);
+    if (g_pmsg[0]) SDL_RenderDebugText(r, x, y, g_pmsg);
+}
+
 void joyride_overlay_draw(uint32_t *bgra, int w, int h) {
     if (!g_open || w < 320 || h < 200) return;
     SDL_Surface *s = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_ARGB8888, bgra, w * 4);
@@ -239,6 +307,13 @@ void joyride_overlay_draw(uint32_t *bgra, int w, int h) {
     SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(r, 0, 0, 0, 150);
     SDL_RenderFillRect(r, NULL);
+    if (g_pause) {
+        draw_pause(r, vw, vh);
+        SDL_RenderPresent(r);
+        SDL_DestroyRenderer(r);
+        SDL_DestroySurface(s);
+        return;
+    }
 
     const float pw = 37 * 8, ph = (ITEM_COUNT + 5) * 12;
     SDL_FRect panel = { (vw - pw) / 2, (vh - ph) / 2, pw, ph };
@@ -341,6 +416,16 @@ void joyride_safe_point(void) {
             SDL_Delay(16);
         }
         joyride_display_apply();
+    }
+    static uint64_t quit_at;                       /* the pause menu's Quit: the game's Esc, then Enter */
+    if (g_quit == 1) {
+        g_quit = 2, quit_at = SDL_GetTicks() + 150;
+        joyride_screen_key(SDL_SCANCODE_ESCAPE, 1);
+        joyride_screen_key(SDL_SCANCODE_ESCAPE, 0);
+    } else if (g_quit == 2 && SDL_GetTicks() >= quit_at) {
+        g_quit = 0;
+        joyride_screen_key(SDL_SCANCODE_RETURN, 1);
+        joyride_screen_key(SDL_SCANCODE_RETURN, 0);
     }
     joyride_smooth_wait();                         /* frames between steps (smooth.c) */
 }
