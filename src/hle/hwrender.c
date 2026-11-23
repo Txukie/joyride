@@ -43,6 +43,8 @@
 #include "joyride_hle.h"
 
 int joyride_hwrender;                  /* the overlay's "Renderer: GPU" */
+static int g_arrow;                    /* the HUD is drawing a direction arrow (postlift.py's splice) */
+void joyride_hw_arrow(int on) { g_arrow = on; }
 extern uint32_t joyride_texclamp;      /* texfilter.c: the polygon drawn is a tile (lid) */
 #define LID_GROW 0.6f                  /* pixels a lid is drawn past each side: no seams */
 
@@ -156,6 +158,19 @@ int joyride_hw_polygon(void) {
                (float)MEM8(p + 0x20 + 2 * k) + 0.5f, (float)MEM8(p + 0x21 + 2 * k) + 0.5f);   /* texel centres */
     }
     if (joyride_texclamp) grow(q);                          /* a lid (the tiles' entry, 0x497710, sets the clamp) */
+    /* A direction arrow, at the HUD's size: the game draws it at the size it
+     * had on a 640 x 480 screen; it grows about its own middle, staying where
+     * the game put it around the player. */
+    if (g_arrow) {
+        int sw, sh;
+        joyride_display_current(&sw, &sh);
+        float k = (float)joyride_screen_hud_scale(sh ? sh : 768);
+        if (k > 1.0f) {
+            float cx = 0, cy = 0;
+            for (int i = 0; i < 4; i++) cx += q->x[i] * 0.25f, cy += q->y[i] * 0.25f;
+            for (int i = 0; i < 4; i++) q->x[i] = cx + (q->x[i] - cx) * k, q->y[i] = cy + (q->y[i] - cy) * k;
+        }
+    }
     return 1;
 }
 

@@ -161,6 +161,13 @@ for _a in (0x00407439, 0x00407654, 0x0040780E, 0x004079FE, 0x00407B71, 0x00407C9
 # with the command's record in ebp or at [esp + 0x10] (the interpreter's
 # switch, 0x447214; driveby.c checks which).
 TEXAFTER[0x0044A88E] = "{ extern void joyride_script_nop(uint32_t, uint32_t); joyride_script_nop(ebp, esp); }"
+# The direction arrows, drawn by the HUD (0x483390) as sprites (0x47BC00 on
+# 0x784770, the objective's, and 0x784658): flagged for the GPU renderer,
+# which draws them at the HUD's size (src/hle/hwrender.c).
+for _a in (0x00483636, 0x00483653):
+    TEXAFTER[_a] = "{ extern void joyride_hw_arrow(int); joyride_hw_arrow(1); }"
+for _a in (0x0048363B, 0x00483658):
+    TEXAFTER[_a] = "{ extern void joyride_hw_arrow(int); joyride_hw_arrow(0); }"
 ADDR = re.compile(r"/\* 0x([0-9A-F]{8}): ")
 
 GOTO = re.compile(r"goto L_([0-9A-F]{8});.*/\* 0x([0-9A-F]{8}): (j\w*|loop\w*) ")
@@ -187,7 +194,7 @@ def process(path: str) -> int:
                 added += 1
         out.append(line)
         a = ADDR.search(line)
-        if a and int(a.group(1), 16) in TEXAFTER and line.lstrip().startswith(("SET_HI8", "SET_LO8(eax, MEM8(0x503224))", "SET_LO8(eax, MEM8(0x502F34))", "RECOMP_CALL(sub_00430B20)", "RECOMP_CALL(sub_004749C0)", "RECOMP_CALL(sub_004067C0)", "ebp = MEM32(ecx);", "RECOMP_CALL(sub_00430D40)",
+        if a and int(a.group(1), 16) in TEXAFTER and line.lstrip().startswith(("SET_HI8", "SET_LO8(eax, MEM8(0x503224))", "SET_LO8(eax, MEM8(0x502F34))", "RECOMP_CALL(sub_00430B20)", "RECOMP_CALL(sub_004749C0)", "RECOMP_CALL(sub_0047BC00)", "PUSH32(esp, 0x00784770u)", "PUSH32(esp, 0x00784658u)", "RECOMP_CALL(sub_004067C0)", "ebp = MEM32(ecx);", "RECOMP_CALL(sub_00430D40)",
         "esp = esp - 0x10u", "esp = esp + 0x10u", "PUSH32(esp, esi)", "eax = MEM32(0x775580)", "edi = MEM32(0x4B8C58)", "eax = MEM32(esp + 0xC)", "esp = esp + 0x10u", "MEM32(ecx) = ebx", "MEM32(ecx + 0x24) = edx", "MEM8(ecx + 0x74F18C)", "edx =", "esi =", "PUSH32(esp, ebp)", "/* cmp MEM16(esi + 0x22), 0x25u */", "ecx = MEM32(eax + 0x18)", "edi = MEM32(ecx + 0x18)")):
             if True:
                 indent = line[:len(line) - len(line.lstrip())]

@@ -47,7 +47,8 @@ out of sight at the screen's real edges. Menus stay 640×480.
   [`docs/exe-3dfx.md`](docs/exe-3dfx.md).
 * **HUD size** (GPU renderer) — the game draws its HUD at its 640×480
   size whatever the screen; it is enlarged by whole times, piece by piece
-  (score and weapon stay in their corners, centred messages keep their layout): auto
+  (score and weapon stay in their corners, centred messages keep their
+  layout), the direction arrows with it: auto
   (×3 at 4K, ×2 at 1080p and 1440p) or ×1–×4.
 * **Textures** — bilinear filtering, the 3dfx version's look (default), or
   sharp. Filtered on the GPU like the 3dfx card did (Vulkan; on the CPU
