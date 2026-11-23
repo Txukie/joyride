@@ -66,7 +66,8 @@ out of sight at the screen's real edges. Menus stay 640×480.
 * **Fullscreen** (also F11 or Alt+Enter).
 * **Drive-bys** — *as the game* (default: only where London 1961's
   missions allow them) or *always*, in every game: fire in a car shoots
-  your weapon out of its side (see the Launcher section). In a network game
+  your weapon out of its side (see the Launcher section), except in a car
+  with a bomb fitted, where fire is the bomb's. In a network game
   the host's choice is everyone's, for the whole game.
 
 **Menus on wide screens.** The menus stay 640×480; on a screen that is not

@@ -68,6 +68,10 @@ int joyride_driveby_on(void) {
 /* the car's step (pad.c's splice at 0x40A418) */
 void joyride_driveby(uint32_t car) {
     if (!joyride_driveby_on() || MEM16(car + 0x22) == 0x25) return;   /* the tank has its own gun */
+    /* a car with a bomb (+0x9C: 0 none, else its kind and state, as the
+     * game's fire in a car, 0x407000, and its step, 0x40B0xx, keep it):
+     * fire is the bomb's, no drive-by */
+    if (MEM32(car + 0x9C)) return;
     uint32_t ped = (uint32_t)(int32_t)(int16_t)MEM16(car + 2);
     if ((int32_t)ped < 0) return;
     uint32_t p = 0x7284E0u + ped * 256u;
