@@ -28,8 +28,9 @@ python3 "$root/tools/unpack.py" "$exe" "$out/mine" > "$out/unpack.txt"
 tail -4 "$out/lift.log"
 python3 "$root/tools/postlift.py" "$out/recomp"
 
-# every generated file must at least parse against the runtime headers
+# every generated file must at least parse, as the build compiles it: the
+# runtime headers, and joyride's own (the splices postlift.py adds use it)
 ls "$out"/recomp/*.c | xargs -P "$(nproc)" -I{} sh -c \
-  'LC_ALL=C gcc -m32 -w -fsyntax-only -I "$0/runtime/recomp32" -include "$1/recomp/recomp_funcs.h" "{}"' \
-  "$pcr" "$out"
+  'LC_ALL=C gcc -w -fsyntax-only -DRECOMP_MEM_BASE=0x100000000000ull -I "$0/runtime/recomp32" -I "$2/src/hle" -include "$1/recomp/recomp_funcs.h" -include "$2/src/hle/texfilter_inline.h" "{}"' \
+  "$pcr" "$out" "$root"
 echo "all generated files parse"
