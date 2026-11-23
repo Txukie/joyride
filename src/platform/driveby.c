@@ -86,6 +86,13 @@ void joyride_driveby(uint32_t car) {
     int32_t player = (int16_t)hle_call_guest(0x464440, 1, &ped);
     if (player < 0 || player >= 8) return;
     if (g_reload[player] > 0) g_reload[player]--;
+    /* fire held: the game sets the driver's flag (ped +0x46) on the press
+     * (0x453210) but in a car never clears it; the release is in the
+     * player's control word for this step (0x5031A8 + 4 a player, decoded
+     * before the cars move: bit 3 the fire control changed, 0x200000 down),
+     * the same on every machine of a network game */
+    uint32_t word = MEM32(0x5031A8u + (uint32_t)player * 4u);
+    if ((word & 8) && !(word & 0x200000)) MEM8(p + 0x46) = 0;
     if (!MEM8(p + 0x46) || g_reload[player] > 0) return;  /* fire not held, or reloading */
     if (!g_ped) g_ped = hle_va(hle_alloc(256));
     if (!g_ped) return;
@@ -116,7 +123,6 @@ void joyride_driveby(uint32_t car) {
     MEM16(g_ped + 0x64) = 0;                              /* ready: the reload is kept here, per player */
     uint32_t arg = g_ped;
     hle_call_guest(0x4532F0, 1, &arg);
-    MEM8(p + 0x46) = 0;                                   /* one shot a press: in a car the game never clears it */
     int16_t r = (int16_t)MEM16(g_ped + 0x64);
     g_reload[player] = r > 0 ? r : 0;
 }
