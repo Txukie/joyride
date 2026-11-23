@@ -133,13 +133,13 @@ int joyride_overlay_open(void) { return g_open; }
  * own Esc once play resumes and then Enter to its "Ya want out?": the level
  * ends and its results show. */
 enum { P_CONTINUE, P_SAVE, P_QUIT, P_COUNT };
-static int g_pause, g_psel, g_quit;
-static char g_pmsg[64];
+static int g_pause, g_psel, g_quit, g_pconfirm;
+static char g_pmsg[160];
 
 void joyride_pause_toggle(void) {
     if (g_open && g_pause) { g_open = g_pause = 0; joyride_screen_refresh(); return; }
     if (g_open || !joyride_pad_in_play()) return;
-    g_open = g_pause = 1, g_psel = P_CONTINUE, g_pmsg[0] = 0;
+    g_open = g_pause = 1, g_psel = P_CONTINUE, g_pmsg[0] = 0, g_pconfirm = 0;
     joyride_screen_refresh();
 }
 
@@ -147,14 +147,26 @@ static int pause_key(int sc) {
     switch (sc) {
     case SDL_SCANCODE_ESCAPE: case SDL_SCANCODE_F6: g_open = g_pause = 0; break;
     case SDL_SCANCODE_UP:
+        g_pconfirm = 0, g_pmsg[0] = 0;
         do g_psel = (g_psel + P_COUNT - 1) % P_COUNT; while (g_psel == P_SAVE && !joyride_savegame_can_save());
         break;
     case SDL_SCANCODE_DOWN:
+        g_pconfirm = 0, g_pmsg[0] = 0;
         do g_psel = (g_psel + 1) % P_COUNT; while (g_psel == P_SAVE && !joyride_savegame_can_save());
         break;
     case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER: case SDL_SCANCODE_SPACE:
         if (g_psel == P_CONTINUE) g_open = g_pause = 0;
-        else if (g_psel == P_SAVE) joyride_savegame_save(g_pmsg, sizeof g_pmsg);
+        else if (g_psel == P_SAVE) {
+            int secs = joyride_savegame_mission_secs();
+            if (secs >= 0 && !g_pconfirm) {                 /* a mission under way: say what is lost first */
+                g_pconfirm = 1;
+                snprintf(g_pmsg, sizeof g_pmsg, "The mission under way is not\nkept: it started %d min %02d s\nago. Enter again to save.",
+                         secs / 60, secs % 60);
+            } else {
+                g_pconfirm = 0;
+                joyride_savegame_save(g_pmsg, sizeof g_pmsg);
+            }
+        }
         else g_open = g_pause = 0, g_quit = 1;
         break;
     default: break;
@@ -268,7 +280,7 @@ static void size_name(int i, char *out, size_t n) {
 }
 
 static void draw_pause(SDL_Renderer *r, float vw, float vh) {
-    const float pw = 30 * 8, ph = (P_COUNT + 6) * 12;
+    const float pw = 32 * 8, ph = (P_COUNT + 8) * 12;
     SDL_FRect panel = { (vw - pw) / 2, (vh - ph) / 2, pw, ph };
     SDL_SetRenderDrawColor(r, 16, 16, 24, 235);
     SDL_RenderFillRect(r, &panel);
@@ -287,11 +299,14 @@ static void draw_pause(SDL_Renderer *r, float vw, float vh) {
         }
         int off = i == P_SAVE && !can;
         SDL_SetRenderDrawColor(r, off ? 110 : 255, off ? 110 : 255, off ? 110 : 255, 255);
-        SDL_RenderDebugText(r, x, y, i == P_SAVE && off && joyride_net_driveby() >= 0 ? "Save game (not online)" : label[i]);
+        SDL_RenderDebugText(r, x, y, i == P_SAVE && off && joyride_net_driveby() >= 0 ? "Save game (not online)" :
+                                     i == P_SAVE && g_pconfirm ? "Save anyway" : label[i]);
     }
     y += 8;
     SDL_SetRenderDrawColor(r, 230, 200, 40, 255);
-    if (g_pmsg[0]) SDL_RenderDebugText(r, x, y, g_pmsg);
+    char lines[sizeof g_pmsg];                         /* the message, a line at a time */
+    snprintf(lines, sizeof lines, "%s", g_pmsg);
+    for (char *l = strtok(lines, "\n"); l; l = strtok(NULL, "\n"), y += 10) SDL_RenderDebugText(r, x, y, l);
 }
 
 void joyride_overlay_draw(uint32_t *bgra, int w, int h) {

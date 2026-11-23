@@ -81,6 +81,7 @@ void joyride_savegame_menus(void);              /* a frame of the menus was show
 void joyride_savegame_step(void);               /* each game step in play (pad.c) */
 int  joyride_savegame_can_save(void);           /* in play, a level of one's own (not a network game) */
 int  joyride_savegame_save(char *msg, size_t n);/* 1 saved; msg says what happened */
+int  joyride_savegame_mission_secs(void);      /* since the mission under way started, -1 none */
 /* the pause menu (overlay.c) */
 void joyride_pause_toggle(void);
 int  joyride_pad_in_play(void);

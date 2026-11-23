@@ -74,10 +74,14 @@ out of sight at the screen's real edges. Menus stay 640×480.
 does. In play, Start (F6 on the keyboard) pauses with *Continue*, *Save game*
 and *Quit* (the level ends, as with the game's own Esc). One save per
 character and level (each city's chapter), in
-`~/.local/share/joyride/saves/`: your score and its multiplier and your
-weapons' ammunition. Starting that level again puts them back, always at
-the level's spawn point, with no wanted level and nothing broken. Mission
-progress is next (`src/platform/savegame.c`). Not in network games.
+`~/.local/share/joyride/saves/`: your score and its multiplier, your
+weapons' ammunition and the missions you have passed. Starting that level
+again puts them back, always at the level's spawn point, with no wanted
+level and nothing broken. A mission is passed or not started: the game
+saves itself as each mission starts, and a save during one keeps your
+score and weapons but not that mission (the menu says first how long ago
+it started; a failed mission is offered again). See
+`src/platform/savegame.c`. Not in network games.
 
 **Menus on wide screens.** The menus stay 640×480; on a screen that is not
 4:3 joyride can fill the bars with your own wide picture made to go around
