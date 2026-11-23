@@ -64,6 +64,10 @@ out of sight at the screen's real edges. Menus stay 640×480.
 * **Scaling** of the picture to the window: sharp (default), smooth,
   nearest, integer.
 * **Fullscreen** (also F11 or Alt+Enter).
+* **Drive-bys** — *as the game* (default: only where London 1961's
+  missions allow them) or *always*, in every game: fire in a car shoots
+  your weapon out of its side (see the Launcher section). In a network game
+  the host's choice is everyone's, for the whole game.
 
 **Menus on wide screens.** The menus stay 640×480; on a screen that is not
 4:3 joyride can fill the bars with your own wide picture made to go around
@@ -76,7 +80,7 @@ With the software renderer, up to 2560×1440 keeps the game's full speed
 with filtering, but with few frames between steps; the GPU renderer keeps
 the display's rate there.
 `JOYRIDE_RES=<w>x<h>|desktop|game`, `JOYRIDE_RENDERER=software|gpu`, `JOYRIDE_CONTROLLER=modern|classic`,
-`JOYRIDE_FILTER=0|1`, `JOYRIDE_SMOOTH=0|1`, `JOYRIDE_HUD=auto|1-4` and `JOYRIDE_SCALE=<mode>` override
+`JOYRIDE_FILTER=0|1`, `JOYRIDE_SMOOTH=0|1`, `JOYRIDE_HUD=auto|1-4`, `JOYRIDE_DRIVEBY=game|always` and `JOYRIDE_SCALE=<mode>` override
 the file for one run.
 
 Not yet: Windows and macOS builds.
@@ -129,16 +133,18 @@ you aim doesn't move.
 | Left stick | steer (the game's own analog steering, 7 steps each way) |
 | Right stick | aim the tank's turret where the stick points |
 | R2 / L2 | accelerate / brake and reverse, progressive: half way is half the pull |
-| X | shoot (tank, fire engine) |
+| X | shoot (the tank's cannon; drive-bys when they are on) |
 | A | handbrake |
 | Y | exit vehicle |
 | B | special |
-| L1 / R1 | previous / next radio station |
+| L1 / R1 | previous / next weapon (for drive-bys) |
+| D-pad left / right | previous / next radio station |
 
 **Both:** Start pauses the game (its own pause, as F6 does; again to
 resume); Select shows the city map; d-pad up / down zoom the game in and
 out (from twice as close to twice as far; + and - on the keyboard);
-L3+R3 opens the settings. In the
+L3+R3 opens the settings; the left back buttons (L4 / L5 on a Steam
+Controller or Steam Deck) are the debugging keys below. In the
 game's menus the d-pad or left stick move, A (or Start) accepts and B goes
 back.
 
@@ -153,7 +159,7 @@ engine. The game's throttle and brake are on or off, so joyride keeps them
 on and scales the push the game gives the car each step by how far the
 trigger is pressed; the cars have drag, so half throttle also levels off
 at about half the top speed. The radio stations are the game's ten music tracks;
-L1/R1 move the car's music to the next or previous one without stopping,
+d-pad left/right move the car's music to the next or previous one without stopping,
 and the next car you get into plays its own station again.
 
 The tank is the only vehicle with a turret in this version of the game:
@@ -174,14 +180,14 @@ texture files the first time it runs (a few seconds, in the background) and
 keeps them in `~/.local/share/joyride/maps/`; delete them to rebuild.
 See [`src/platform/map.c`](src/platform/map.c).
 
-### Debugging (d-pad left / right, F7 / F8)
+### Debugging (L4 / L5, F7 / F8)
 
-D-pad left (F7) writes a report to `~/.local/share/joyride/debug/<time>/`
+L4 (F7) writes a report to `~/.local/share/joyride/debug/<time>/`
 for a bug report: `report.txt` (the settings, and the last ten seconds of
 play step by step and frame by frame: player, car, camera, controls,
 frame times; cars that turn up above street level and which of the game's spawners set them up), the next ten frames on screen (`screen_00.png` to
 `screen_09.png`, written in the background over a few seconds), the
-game's own surface (`cpu.png`) and its memory (`memory.bin`). D-pad right
+game's own surface (`cpu.png`) and its memory (`memory.bin`). L5
 (F8) gives every weapon with 99 rounds and, in a vehicle, turns it into
 the next model the city has (all but the tank). See
 [`src/platform/debug.c`](src/platform/debug.c).
@@ -190,12 +196,12 @@ the next model the city has (all but the tank). See
 
 | Key | |
 | --- | --- |
-| F1 | settings: screen size, renderer, HUD size, textures, motion, controller, scaling, fullscreen |
+| F1 | settings: screen size, renderer, HUD size, textures, motion, controller, drive-bys, scaling, fullscreen |
 | M | city map |
 | + / - | zoom the game in / out |
 | F6 | pause (the game's own) |
-| F7 | debug report (as d-pad left) |
-| F8 | all weapons, next vehicle (as d-pad right) |
+| F7 | debug report (as L4) |
+| F8 | all weapons, next vehicle (as L5) |
 | F11, Alt+Enter | fullscreen |
 | Esc, then Enter | quit (the game's own menu); closing the window twice also quits |
 
@@ -234,9 +240,9 @@ London runs on the same recompiled 2002 executable: its files go over GTA's
 under GTA's names, and its levels into the slots the 2002 front end has
 (see `launcher/src/core/games.cpp`). London 1961's drive-bys, which the 2002
 executable lacks, are joyride's: while a mission allows them, fire in a car
-shoots your weapon out of its side as London 1961's own executable does, and
-L1/R1 change the weapon instead of the radio station
-(`src/platform/driveby.c`). Each London game keeps its own saves and city
+shoots your weapon out of its side as London 1961's own executable does
+(`src/platform/driveby.c`); the Drive-bys setting makes them always on, in
+any of the games. Each London game keeps its own saves and city
 maps (`JOYRIDE_PROFILE`), and the city map (M) shows London.
 
 ```bash

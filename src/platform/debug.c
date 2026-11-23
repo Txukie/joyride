@@ -1,8 +1,8 @@
 /*
- * joyride - debugging aids in play (the controller's d-pad left and right;
- * F7 and F8 on the keyboard).
+ * joyride - debugging aids in play (the controller's left back buttons, L4
+ * and L5 on a Steam Controller or Steam Deck; F7 and F8 on the keyboard).
  *
- * Left (F7): a report. joyride keeps the last 10 seconds of play in memory,
+ * L4 (F7): a report. joyride keeps the last 10 seconds of play in memory,
  * each game step (the player, the car, the camera, the controls) and each
  * frame drawn (its time, its place between steps, the camera it used), and
  * writes them to <data>/debug/<time>/report.txt, with the next 10 frames
@@ -10,7 +10,7 @@
  * surface; frames.txt: when each was shown) and the game's memory
  * (memory.bin, 0x4AB000..0x791000). The log line says where.
  *
- * Right (F8): all weapons (99 rounds each: player +0x13F + slot, slots
+ * L5 (F8): all weapons (99 rounds each: player +0x13F + slot, slots
  * 1-4) and, in a vehicle, the next model the style has (swap_model).
  */
 #include <stdio.h>

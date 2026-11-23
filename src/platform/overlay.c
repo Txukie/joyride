@@ -28,7 +28,7 @@
 #include "win32hle.h"
 #include "joyride_hle.h"
 
-joyride_settings joyride_cfg = { 0, 0, 1, 0, 0, 1, 0, 1, 0 };
+joyride_settings joyride_cfg = { 0, 0, 1, 0, 0, 1, 0, 1, 0, 0 };
 static char g_path[4096];
 
 /* ---- settings file ------------------------------------------------------- */
@@ -52,6 +52,7 @@ void joyride_config_load(const char *path) {
         else if (!strcmp(key, "renderer")) joyride_cfg.hwrender = !strcmp(val, "gpu");
         else if (!strcmp(key, "controller")) joyride_cfg.controls_modern = strcmp(val, "classic") != 0;
         else if (!strcmp(key, "hud")) joyride_cfg.hud = !strcmp(val, "auto") ? 0 : atoi(val) < 1 ? 1 : atoi(val) > 4 ? 4 : atoi(val);
+        else if (!strcmp(key, "driveby")) joyride_cfg.driveby = !strcmp(val, "always");
     }
     if (f) fclose(f);
 
@@ -70,6 +71,7 @@ void joyride_config_load(const char *path) {
     if ((e = getenv("JOYRIDE_FILTER")) && *e) joyride_cfg.filter = *e != '0';    /* "cpu": on, on the CPU */
     if ((e = getenv("JOYRIDE_SMOOTH")) && *e) joyride_cfg.smooth = *e != '0';
     if ((e = getenv("JOYRIDE_RENDERER")) && *e) joyride_cfg.hwrender = !strcmp(e, "gpu");
+    if ((e = getenv("JOYRIDE_DRIVEBY")) && *e) joyride_cfg.driveby = !strcmp(e, "always");
     if ((e = getenv("JOYRIDE_HUD")) && *e) joyride_cfg.hud = !strcmp(e, "auto") ? 0 : atoi(e) < 1 ? 1 : atoi(e) > 4 ? 4 : atoi(e);
     if ((e = getenv("JOYRIDE_CONTROLLER")) && *e) joyride_cfg.controls_modern = strcmp(e, "classic") != 0;
     if ((e = getenv("JOYRIDE_SCALE")) && *e)
@@ -94,13 +96,14 @@ void joyride_config_save(void) {
     fprintf(f, "controller=%s\n", joyride_cfg.controls_modern ? "modern" : "classic");
     if (joyride_cfg.hud) fprintf(f, "hud=%d\n", joyride_cfg.hud);
     else fprintf(f, "hud=auto\n");
+    fprintf(f, "driveby=%s\n", joyride_cfg.driveby ? "always" : "game");
     fclose(f);
     rename(tmp, g_path);
 }
 
 /* ---- the menu ------------------------------------------------------------ */
 
-enum { ITEM_RES, ITEM_RENDERER, ITEM_HUD, ITEM_FILTER, ITEM_SMOOTH, ITEM_CONTROLS, ITEM_SCALING, ITEM_FULLSCREEN, ITEM_RESUME, ITEM_COUNT };
+enum { ITEM_RES, ITEM_RENDERER, ITEM_HUD, ITEM_FILTER, ITEM_SMOOTH, ITEM_CONTROLS, ITEM_DRIVEBY, ITEM_SCALING, ITEM_FULLSCREEN, ITEM_RESUME, ITEM_COUNT };
 
 static int g_open, g_sel;
 static int g_sizes[HLE_DD_MAX_MODES + 1][2], g_nsizes;   /* [0] = the game's own */
@@ -152,6 +155,10 @@ static void change(int dir) {
         break;
     case ITEM_HUD:
         joyride_cfg.hud = (joyride_cfg.hud + dir + 5) % 5;
+        joyride_config_save();
+        break;
+    case ITEM_DRIVEBY:
+        joyride_cfg.driveby = !joyride_cfg.driveby;
         joyride_config_save();
         break;
     case ITEM_CONTROLS:
@@ -276,6 +283,12 @@ void joyride_overlay_draw(uint32_t *bgra, int w, int h) {
         case ITEM_CONTROLS:
             snprintf(label, sizeof label, "Controller");
             snprintf(val, sizeof val, "%s", joyride_cfg.controls_modern ? "modern (twin stick)" : "classic (tank)");
+            break;
+        case ITEM_DRIVEBY:
+            snprintf(label, sizeof label, "Drive-bys");
+            if (joyride_net_driveby() >= 0)                  /* a network game: the host's */
+                snprintf(val, sizeof val, "%s (host's rule)", joyride_net_driveby() ? "always" : "as the game");
+            else snprintf(val, sizeof val, "%s", joyride_cfg.driveby ? "always" : "as the game (London 1961)");
             break;
         case ITEM_SCALING:
             snprintf(label, sizeof label, "Scaling");

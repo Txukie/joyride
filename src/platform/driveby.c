@@ -1,5 +1,7 @@
 /*
- * joyride - London 1961's drive-bys, on GTA's 2002 executable.
+ * joyride - drive-bys: London 1961's, on GTA's 2002 executable, and in any
+ * of the games when the player opts in (the F1 menu's "Drive-bys: always";
+ * in a network game the host's choice, dplay.c, for every machine).
  *
  * London 1961's own executable (1999) has two mission commands the 2002
  * one lacks, PLAYER_DRIVE_BY and PLAYER_DRIVE_BY_OFF (its commands 154 and
@@ -56,11 +58,16 @@ void joyride_script_nop(uint32_t ebp, uint32_t esp) {
     }
 }
 
-int joyride_driveby_on(void) { return g_on; }
+/* on now: the mission allows it (London 1961), or the rule is "always" (the
+ * host's in a network game, else this player's setting) */
+int joyride_driveby_on(void) {
+    int net = joyride_net_driveby();
+    return g_on || (net >= 0 ? net : joyride_cfg.driveby);
+}
 
 /* the car's step (pad.c's splice at 0x40A418) */
 void joyride_driveby(uint32_t car) {
-    if (!g_on || MEM16(car + 0x22) == 0x25) return;     /* the tank has its own gun */
+    if (!joyride_driveby_on() || MEM16(car + 0x22) == 0x25) return;   /* the tank has its own gun */
     uint32_t ped = (uint32_t)(int32_t)(int16_t)MEM16(car + 2);
     if ((int32_t)ped < 0) return;
     uint32_t p = 0x7284E0u + ped * 256u;

@@ -73,6 +73,8 @@ void joyride_debug_tank_fire(uint32_t car);
 void joyride_script_nop(uint32_t ebp, uint32_t esp);
 void joyride_driveby(uint32_t car);
 int joyride_driveby_on(void);
+/* network play's rules from the host (dplay.c): -1 not in a network game */
+int joyride_net_driveby(void);
 void joyride_screen_snapshot(const char *dir);     /* the next frame presented, saved there */                /* each pump: the pad in menus (pad.c) */
 void joyride_map_init(const char *install_root, const char *data_dir);
 /* the picture around the menus on wide screens (src/platform/backdrop.c) */
@@ -105,6 +107,7 @@ typedef struct {
     int hwrender;           /* the world drawn by the GPU (hwrender.c) */
     int controls_modern;    /* the controller scheme (pad.c) */
     int hud;                /* HUD size with the GPU renderer: 0 auto, else that many times */
+    int driveby;            /* drive-bys: 0 as the game (London 1961's missions), 1 always */
 } joyride_settings;
 extern joyride_settings joyride_cfg;
 void joyride_config_load(const char *path);   /* then the JOYRIDE_* overrides */

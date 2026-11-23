@@ -77,6 +77,14 @@
 static const uint8_t DPSPGUID_TCPIP[16] = {   /* {36E95EE0-8577-11cf-960C-0080C7534E82} */
     0xE0, 0x5E, 0xE9, 0x36, 0x77, 0x85, 0xCF, 0x11, 0x96, 0x0C, 0x00, 0x80, 0xC7, 0x53, 0x4E, 0x82 };
 
+/* The rules of a network game that are joyride's, not the game's: the
+ * host's, fixed when it creates the session and sent to each guest as it
+ * joins, used by every machine until the session ends (each must run the
+ * same game). -1: not in a network game. */
+#define RULE_DRIVEBY 1u
+static volatile int g_rules = -1;
+int joyride_net_driveby(void) { int r = g_rules; return r < 0 ? -1 : (int)(r & RULE_DRIVEBY); }
+
 /* ---- wire protocol --------------------------------------------------------
  * TCP frames: u32 length (of what follows), u8 type, payload. All little-endian.
  * UDP datagrams: "JOYR" u8 type, payload. */
@@ -84,7 +92,8 @@ enum {
     W_ENUM_REQ = 1,     /* UDP  guidApplication[16] */
     W_ENUM_REPLY,       /* UDP  instance[16] app[16] max u32 cur u32 port u16 name\0 */
     W_JOIN,             /* c>h  instance[16] */
-    W_JOIN_OK,          /* h>c  max u32, then roster as W_PLAYER_ADD frames */
+    W_JOIN_OK,          /* h>c  max u32, joyride's rules u32 (bit 0: drive-bys always;
+                           absent from older hosts: none), then roster as W_PLAYER_ADD frames */
     W_JOIN_REFUSED,     /* h>c  */
     W_CREATE_PLAYER,    /* c>h  token u32 name\0 */
     W_PLAYER_ID,        /* h>c  token u32 id u32 */
@@ -284,9 +293,10 @@ static void host_frame(int c, int type, const uint8_t *p, size_t n) {
             send_frame(fd, W_JOIN_REFUSED, NULL, 0);
             return;
         }
-        uint8_t m[4];
+        uint8_t m[8];
         put32(m, N.max_players);
-        send_frame(fd, W_JOIN_OK, m, 4);
+        put32(m + 4, (uint32_t)(g_rules < 0 ? 0 : g_rules));
+        send_frame(fd, W_JOIN_OK, m, 8);
         for (int i = 0; i < MAX_PLAYERS; i++) {       /* the roster so far */
             player_t *q = &N.players[i];
             if (!q->id) continue;
@@ -325,7 +335,12 @@ static void host_frame(int c, int type, const uint8_t *p, size_t n) {
 
 static void client_frame(int type, const uint8_t *p, size_t n) {
     switch (type) {
-    case W_JOIN_OK: N.joined = 1; if (n >= 4) N.max_players = get32(p); break;
+    case W_JOIN_OK:
+        N.joined = 1;
+        if (n >= 4) N.max_players = get32(p);
+        g_rules = n >= 8 ? (int)(get32(p + 4) & 0x7FFFFFFFu) : 0;   /* an older host: none of joyride's */
+        if (g_rules & RULE_DRIVEBY) fprintf(stderr, "[dplay] the host's rules: drive-bys always\n");
+        break;
     case W_JOIN_REFUSED: N.refused = 1; break;
     case W_PLAYER_ID:
         if (n >= 8 && get32(p) == N.pending_token) N.pending_id = get32(p + 4) ? get32(p + 4) : 0xFFFFFFFFu;
@@ -456,6 +471,7 @@ static void net_close(void) {
     N.q_head = N.q_tail = NULL;
     memset(N.players, 0, sizeof N.players);
     N.is_host = N.lost = N.joined = N.refused = 0;
+    g_rules = -1;
     pthread_mutex_unlock(&N.lock);
 }
 
@@ -643,6 +659,7 @@ static void dp_Open(void) {
         }
         pthread_mutex_lock(&N.lock);
         N.listen_fd = lf, N.udp_fd = uf, N.is_host = 1, N.next_id = 0x00010001u;
+        g_rules = joyride_cfg.driveby ? (int)RULE_DRIVEBY : 0;    /* this host's rules, for the whole session */
         for (int i = 0; i < 16; i++) N.instance[i] = (uint8_t)(rand() ^ (int)now_ms() >> i);
         memcpy(N.app, hle_ptr(sd + SD_APPLICATION), 16);
         N.max_players = MEM32(sd + SD_MAXPLAYERS) ? MEM32(sd + SD_MAXPLAYERS) : 4;

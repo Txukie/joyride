@@ -31,13 +31,16 @@
  *           previous/next weapon. Driving: left stick X steers (the game's
  *           analog steering), R2 accelerates, L2 brakes, both progressive
  *           (driving_modern), X fire, A
- *           handbrake, Y exit, B special, L1/R1 radio station; in the
- *           tank the right stick aims the turret (turret() below).
+ *           handbrake, Y exit, B special, L1/R1 previous/next weapon
+ *           (for drive-bys, driveby.c); in the tank the right stick aims
+ *           the turret (turret() below).
  *   classic The game's tank controls on the pad: left stick steers and
  *           its up/down (or R2/L2) go forward/back, same buttons.
  * Start: the game's own pause (F6). Select: the city map. D-pad up and
- * down zoom the game in and out (display.c); left writes a debug report,
- * right gives all weapons and the next vehicle (debug.c). L3+R3: the
+ * down zoom the game in and out (display.c); left and right, in a car,
+ * change the radio station. The back buttons (SDL's left paddles: L4 and
+ * L5 on a Steam Controller or Steam Deck) are for debugging (debug.c):
+ * L4 writes a report, L5 gives all weapons and the next vehicle. L3+R3: the
  * settings overlay (F1). Outside play (the game's menus, the overlay) the
  * pad works them as the keyboard does: joyride_pad_poll at the end.
  *
@@ -242,7 +245,7 @@ void joyride_pad_throttle(uint32_t car) {
     if (k > 0 && k < 1) *force *= k;
 }
 
-static void driving_modern(const pad_t *p, uint32_t prev_buttons, uint32_t rec) {
+static void driving_modern(const pad_t *p, uint32_t rec) {
     uint32_t car = 0x4BE248u + (MEM32(rec + 0xA8) & 0xFFFF) * 688u;
     int aiming = turret(p, car);
     if (!aiming) steer((int)lrintf(dead(p->lx, 0.15f) * 7.0f));
@@ -268,15 +271,8 @@ static void driving_modern(const pad_t *p, uint32_t prev_buttons, uint32_t rec) 
     hold(C_JUMP, !!(p->buttons & BTN(SDL_GAMEPAD_BUTTON_SOUTH)));     /* handbrake */
     hold(C_ENTER, !!(p->buttons & BTN(SDL_GAMEPAD_BUTTON_NORTH)));
     if (!aiming) hold(C_SPECIAL, !!(p->buttons & BTN(SDL_GAMEPAD_BUTTON_EAST)));
-    uint32_t pressed = p->buttons & ~prev_buttons;
-    if (joyride_driveby_on()) {                              /* London 1961's drive-bys: L1/R1 the weapon */
-        hold(C_PREV, !!(p->buttons & BTN(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)));
-        hold(C_NEXT, !!(p->buttons & BTN(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)));
-        return;
-    }
-    hold(C_PREV, 0), hold(C_NEXT, 0);
-    if (pressed & BTN(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) joyride_radio_step(-1);
-    if (pressed & BTN(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) joyride_radio_step(1);
+    hold(C_PREV, !!(p->buttons & BTN(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)));    /* the weapon, for drive-bys */
+    hold(C_NEXT, !!(p->buttons & BTN(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)));
 }
 
 static void classic(const pad_t *p) {
@@ -316,7 +312,7 @@ void joyride_pad_input(uint32_t word) {
     int on_foot = MEM32(rec + 0xA4) == 2;
     if (!joyride_controls_modern) classic(&p);
     else if (on_foot) on_foot_modern(&p, rec);
-    else driving_modern(&p, prev, rec);
+    else driving_modern(&p, rec);
     /* Start: the game's pause, F6 (0x430DC0 key 0x40: 0x481510 shows
      * "paused", a second press resumes), through the keyboard's path */
     uint32_t pressed = p.buttons & ~prev, released = prev & ~p.buttons;
@@ -326,9 +322,12 @@ void joyride_pad_input(uint32_t word) {
     /* d-pad up / down: zoom the game in / out (display.c) */
     if (pressed & BTN(SDL_GAMEPAD_BUTTON_DPAD_UP)) joyride_camera_zoom(+1);
     if (pressed & BTN(SDL_GAMEPAD_BUTTON_DPAD_DOWN)) joyride_camera_zoom(-1);
-    /* d-pad left / right: debugging (debug.c): a report; all weapons and the next vehicle */
-    if (pressed & BTN(SDL_GAMEPAD_BUTTON_DPAD_LEFT)) joyride_debug_report();
-    if (pressed & BTN(SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) joyride_debug_give();
+    /* d-pad left / right in a car: the radio station */
+    if (!on_foot && (pressed & BTN(SDL_GAMEPAD_BUTTON_DPAD_LEFT))) joyride_radio_step(-1);
+    if (!on_foot && (pressed & BTN(SDL_GAMEPAD_BUTTON_DPAD_RIGHT))) joyride_radio_step(1);
+    /* L4 / L5 (the left back buttons): debugging (debug.c): a report; all weapons and the next vehicle */
+    if (pressed & BTN(SDL_GAMEPAD_BUTTON_LEFT_PADDLE1)) joyride_debug_report();
+    if (pressed & BTN(SDL_GAMEPAD_BUTTON_LEFT_PADDLE2)) joyride_debug_give();
     prev = p.buttons;
 }
 
