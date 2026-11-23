@@ -130,10 +130,13 @@ int joyride_overlay_open(void) { return g_open; }
 /* ---- the pause menu: Start or F6 in play ------------------------------------
  * The game held as for the settings (joyride_safe_point); Continue, Save
  * (savegame.c; not in a network game) and Quit, which gives the game its
- * own Esc once play resumes and then Enter to its "Ya want out?": the level
- * ends and its results show. */
+ * own Esc once play resumes: it asks "Ya want out?", Enter (A) ends the
+ * level, Esc (B) goes on playing. Esc itself in play opens this menu: the
+ * game's question comes only from Quit. */
 enum { P_CONTINUE, P_SAVE, P_QUIT, P_COUNT };
 static int g_pause, g_psel, g_quit, g_pconfirm;
+static int g_asking;                 /* the game's "Ya want out?" is up, from Quit */
+int joyride_quit_asking(void) { return g_asking; }
 static char g_pmsg[160];
 
 void joyride_pause_toggle(void) {
@@ -244,6 +247,14 @@ static void apply_size(void) {
 }
 
 int joyride_overlay_key(int sc, int down, int repeat) {
+    if (g_asking && !g_open && (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER || sc == SDL_SCANCODE_ESCAPE)) {
+        if (!down) g_asking = 0;                 /* the answer: to the game, then the question is over */
+        return 0;
+    }
+    if (sc == SDL_SCANCODE_ESCAPE && !g_open && joyride_pad_in_play()) {   /* Esc in play: our pause menu */
+        if (down && !repeat) joyride_pause_toggle();
+        return 1;
+    }
     if (sc == SDL_SCANCODE_F1) {
         if (down && !repeat && !g_pause) set_open(!g_open);
         return 1;
@@ -432,15 +443,12 @@ void joyride_safe_point(void) {
         }
         joyride_display_apply();
     }
-    static uint64_t quit_at;                       /* the pause menu's Quit: the game's Esc, then Enter */
-    if (g_quit == 1) {
-        g_quit = 2, quit_at = SDL_GetTicks() + 150;
+    if (g_quit) {                                  /* the pause menu's Quit: the game's Esc, its question */
+        g_quit = 0, g_asking = 1;
         joyride_screen_key(SDL_SCANCODE_ESCAPE, 1);
+        g_asking = 1;                              /* (the key-up of our own Esc is not the answer) */
         joyride_screen_key(SDL_SCANCODE_ESCAPE, 0);
-    } else if (g_quit == 2 && SDL_GetTicks() >= quit_at) {
-        g_quit = 0;
-        joyride_screen_key(SDL_SCANCODE_RETURN, 1);
-        joyride_screen_key(SDL_SCANCODE_RETURN, 0);
+        g_asking = 1;
     }
     joyride_smooth_wait();                         /* frames between steps (smooth.c) */
 }

@@ -36,8 +36,12 @@
  *   - a save during a mission keeps the score and weapons of the moment and
  *     the counters of the checkpoint: the pause menu warns first, with the
  *     time since the mission started.
- * Put back, the counters let the script's own loops offer the next jobs (a
- * failed one is offered again: it was not passed).
+ * Taking a phone's job also takes the phone out of the city (TELEPHONE
+ * objects, type 7: +4, the world object, becomes -1); the phones taken at
+ * the checkpoint are kept too, and removed from the fresh city on loading
+ * (0x44EB90, the game's removal of a world object).
+ * Put back, the counters and phones let the script's own loops offer the
+ * next jobs (a failed one is offered again: it was not passed).
  *
  * Not in a network game: everyone must play the same game.
  */
@@ -53,14 +57,15 @@
 #include "joyride_hle.h"
 
 #define MAGIC "JRSV"
-#define VERSION 2u               /* 1: no counters (still read) */
+#define VERSION 3u               /* 1: no counters, 2: no phones (both still read) */
+#define MAXPHONE 512
 #define MAXCOUNT 256
 
 #define OBJS 0x5F30E8u           /* the script's objects, 32 bytes each */
 #define MAXOBJ 4096u
 #define LINES 0x6561C0u          /* script line -> object, int16, -1 none */
 #define NLINES 65536u
-enum { T_COUNTER = 12, T_MISSIONS = 66, T_SECRETS = 67 };
+enum { T_TELEPHONE = 7, T_COUNTER = 12, T_MISSIONS = 66, T_SECRETS = 67 };
 
 typedef struct {
     char magic[4];
@@ -82,6 +87,12 @@ static int g_menus = 1;          /* menus seen since the last level started */
 static int g_n;
 static uint32_t g_obj[MAXCOUNT];
 static counter_t g_check[MAXCOUNT];
+/* this level's phones: taking a job takes its phone out of the city (the
+ * object's +4, the world object, becomes -1); kept with the checkpoint */
+static int g_np;
+static uint32_t g_pobj[MAXPHONE];
+static int32_t g_pline[MAXPHONE];
+static uint8_t g_pgone[MAXPHONE];
 static uint64_t g_started;       /* when a mission started (ms); 0: none since the checkpoint */
 static uint64_t g_settle;        /* until then (ms) the checkpoint follows the counters */
 #define SETTLE_MS 5000           /* a level's first lines, a pass's tidying up */
@@ -123,18 +134,22 @@ static void path_of(char *out, size_t n) {
 static int is_counter(int32_t t) { return t == T_COUNTER || t == T_MISSIONS || t == T_SECRETS; }
 
 static void find_counters(void) {
-    g_n = 0;
-    for (uint32_t line = 0; line < NLINES && g_n < MAXCOUNT; line++) {
+    g_n = g_np = 0;
+    for (uint32_t line = 0; line < NLINES; line++) {
         int32_t o = (int16_t)MEM16(LINES + 2 * line);
         if (o < 0 || (uint32_t)o >= MAXOBJ) continue;
         uint32_t a = OBJS + (uint32_t)o * 32u;
-        if (!is_counter((int32_t)MEM32(a))) continue;
-        g_obj[g_n] = a, g_check[g_n].line = (int32_t)line, g_n++;
+        int32_t t = (int32_t)MEM32(a);
+        if (is_counter(t) && g_n < MAXCOUNT) g_obj[g_n] = a, g_check[g_n].line = (int32_t)line, g_n++;
+        else if (t == T_TELEPHONE && g_np < MAXPHONE) g_pobj[g_np] = a, g_pline[g_np] = (int32_t)line, g_np++;
     }
 }
 
+static int phone_gone(int i) { return (int32_t)MEM32(g_pobj[i] + 4) < 0; }
+
 static void checkpoint(int settle) {
     for (int i = 0; i < g_n; i++) g_check[i].a = (int32_t)MEM32(g_obj[i] + 4), g_check[i].b = (int32_t)MEM32(g_obj[i] + 8);
+    for (int i = 0; i < g_np; i++) g_pgone[i] = (uint8_t)phone_gone(i);
     g_started = 0;
     if (settle) g_settle = SDL_GetTicks() + SETTLE_MS;
 }
@@ -171,7 +186,12 @@ static int write_save(char *msg, size_t n, const char *what) {
     path_of(path, sizeof path);
     snprintf(tmp, sizeof tmp, "%s.tmp", path);
     FILE *f = fopen(tmp, "wb");
-    int ok = f && fwrite(&s, sizeof s, 1, f) == 1 && fwrite(g_check, sizeof *g_check, (size_t)g_n, f) == (size_t)g_n;
+    int32_t gone[MAXPHONE];
+    uint32_t ngone = 0;
+    for (int i = 0; i < g_np; i++)
+        if (g_pgone[i]) gone[ngone++] = g_pline[i];
+    int ok = f && fwrite(&s, sizeof s, 1, f) == 1 && fwrite(g_check, sizeof *g_check, (size_t)g_n, f) == (size_t)g_n &&
+             fwrite(&ngone, 4, 1, f) == 1 && fwrite(gone, 4, ngone, f) == ngone;
     if (f && fclose(f)) ok = 0;
     if (!ok || rename(tmp, path)) {
         snprintf(msg, n, "Save failed: %s", strerror(errno));
@@ -182,8 +202,8 @@ static int write_save(char *msg, size_t n, const char *what) {
     for (int i = 0; i < g_n; i++)
         if ((int32_t)MEM32(g_obj[i]) == T_MISSIONS) left = left < 0 ? g_check[i].a : left + g_check[i].a;
     snprintf(msg, n, "Saved: %d points", s.score);
-    fprintf(stderr, "[save] %s %s: %s, section %d, %d points x%d, %d counters (missions left %d)\n", what, path, s.name,
-            s.section, s.score, s.multiplier, g_n, left);
+    fprintf(stderr, "[save] %s %s: %s, section %d, %d points x%d, %d counters (missions left %d), %u phones taken\n", what,
+            path, s.name, s.section, s.score, s.multiplier, g_n, left, ngone);
     return 1;
 }
 
@@ -208,7 +228,7 @@ static void load(void) {
     int ok = fread(&s, 1, sizeof s, f) >= v1;
     char map[32];
     guest_str(0x6B3E88, map, sizeof map);
-    if (!ok || memcmp(s.magic, MAGIC, 4) || (s.version != 1 && s.version != VERSION) ||
+    if (!ok || memcmp(s.magic, MAGIC, 4) || s.version < 1 || s.version > VERSION ||
         s.section != (int32_t)MEM32(0x6B3E28) || strncmp(s.map, map, sizeof map)) {
         fprintf(stderr, "[save] %s: not this level's, left alone\n", path);
         fclose(f);
@@ -233,8 +253,25 @@ static void load(void) {
             put++;
         }
     }
+    int taken = 0;
+    uint32_t ngone = 0;
+    if (s.version >= 3 && fread(&ngone, 4, 1, f) == 1) {  /* the phones whose jobs were taken: out of the city */
+        for (uint32_t k = 0; k < ngone && k < MAXPHONE; k++) {
+            int32_t line;
+            if (fread(&line, 4, 1, f) != 1 || line < 0 || (uint32_t)line >= NLINES) break;
+            int32_t o = (int16_t)MEM16(LINES + 2 * (uint32_t)line);
+            if (o < 0 || (uint32_t)o >= MAXOBJ) continue;
+            uint32_t a = OBJS + (uint32_t)o * 32u;
+            int32_t ent = (int32_t)MEM32(a + 4);
+            if ((int32_t)MEM32(a) != T_TELEPHONE || ent < 0) continue;
+            uint32_t arg = (uint32_t)ent;
+            hle_call_guest(0x44EB90, 1, &arg);                /* the game's own removal of a world object */
+            MEM32(a + 4) = 0xFFFFFFFFu;
+            taken++;
+        }
+    }
     fclose(f);
-    fprintf(stderr, "[save] loaded %s: %d points x%d, %d counters\n", path, s.score, s.multiplier, put);
+    fprintf(stderr, "[save] loaded %s: %d points x%d, %d counters, %d phones taken\n", path, s.score, s.multiplier, put, taken);
 }
 
 /* ---- each step ---------------------------------------------------------------- */
@@ -256,6 +293,8 @@ void joyride_savegame_step(void) {
         if (a != g_check[i].a || b != g_check[i].b) changed = 1;
         if ((t == T_MISSIONS || t == T_SECRETS) && a < g_check[i].a) passed = 1;
     }
+    for (int i = 0; i < g_np; i++)
+        if (phone_gone(i) != g_pgone[i]) changed = 1;     /* a job's phone taken out: a mission starting */
     if (passed) {                                         /* a mission passed: the new checkpoint */
         checkpoint(1);
         fprintf(stderr, "[save] a mission passed: checkpoint\n");

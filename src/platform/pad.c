@@ -312,6 +312,15 @@ void joyride_pad_input(uint32_t word) {
     g_share_car = 0;                                        /* set again below while driving */
     g_last_pad = p;
     if (!p.present) { prev = 0; return; }
+    if (joyride_quit_asking()) {                            /* the game's "Ya want out?": A Enter, B Esc */
+        uint32_t pr = p.buttons & ~prev, rl = prev & ~p.buttons;
+        if (pr & BTN(SDL_GAMEPAD_BUTTON_SOUTH)) joyride_screen_key(SDL_SCANCODE_RETURN, 1);
+        if (rl & BTN(SDL_GAMEPAD_BUTTON_SOUTH)) joyride_screen_key(SDL_SCANCODE_RETURN, 0);
+        if (pr & BTN(SDL_GAMEPAD_BUTTON_EAST)) joyride_screen_key(SDL_SCANCODE_ESCAPE, 1);
+        if (rl & BTN(SDL_GAMEPAD_BUTTON_EAST)) joyride_screen_key(SDL_SCANCODE_ESCAPE, 0);
+        prev = p.buttons;
+        return;
+    }
     g_word = word;
     uint32_t rec = 0x74F160u + MEM32(0x74F83C) * 444u;
     int on_foot = MEM32(rec + 0xA4) == 2;

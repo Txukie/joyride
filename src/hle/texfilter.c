@@ -34,10 +34,13 @@
  * 32-bit colour only: in 8-bit modes a blend has no palette entry, and the
  * 16-bit loops are not hooked yet. The F1 overlay switches it (overlay.c).
  */
+#define _GNU_SOURCE                    /* process_vm_readv */
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/uio.h>
+#include <unistd.h>
 
 #include "joyride_hle.h"
 
@@ -296,6 +299,20 @@ static uint64_t hash(const uint8_t *p, size_t n) {
     return h | 1;
 }
 
+/* Guest memory the game freed (VirtualFree: the pages unmapped) between
+ * drawing a frame and its showing, as when a level ends mid-frame: a page
+ * used then can no longer be read. Asked of the kernel, which answers
+ * EFAULT instead of the fault reading it would be. */
+static int readable(const void *p, size_t n) {
+    static pid_t self;
+    if (!self) self = getpid();
+    char b[2];
+    struct iovec loc = { b, 1 }, rem[2] = { { (void *)p, 1 }, { (void *)((const char *)p + n - 1), 1 } };
+    for (int i = 0; i < 2; i++)
+        if (process_vm_readv(self, &loc, 1, &rem[i], 1, 0) != 1) return 0;
+    return 1;
+}
+
 /* pages used since the last frame whose texels changed since uploaded:
  * calls `up` with slot and 64 KB; palettes likewise with 256 colours */
 void joyride_gbuf_changes(void (*page)(void *ctx, int slot, const uint8_t *texels),
@@ -309,6 +326,7 @@ void joyride_gbuf_changes(void (*page)(void *ctx, int slot, const uint8_t *texel
         if (!g_page_used[s]) continue;
         g_page_used[s] = 0;
         const uint8_t *d = GUEST(g_page_addr[s]);
+        if (!readable(d, 65536)) { g_page_hash[s] = 0; continue; }   /* freed since (a level ending) */
         uint64_t h = hash(d, 65536);
         if (h != g_page_hash[s]) { g_page_hash[s] = h; page(ctx, s, d); }
     }
@@ -316,6 +334,7 @@ void joyride_gbuf_changes(void (*page)(void *ctx, int slot, const uint8_t *texel
     for (int s = 0; s < g_npals; s++) {
         if (!g_pal_used[s]) continue;
         g_pal_used[s] = 0;
+        if (!readable(GUEST(g_pal_addr[s]), 255 * 256 + 4)) { g_pal_hash[s] = 0; continue; }   /* freed since */
         for (int t = 0; t < 256; t++) c[t] = colour(g_pal_addr[s], (uint32_t)t) | 0xFF000000u;
         uint64_t h = hash((const uint8_t *)c, sizeof c);
         if (h != g_pal_hash[s]) { g_pal_hash[s] = h; pal(ctx, s, c); }

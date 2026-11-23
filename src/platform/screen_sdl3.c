@@ -1176,7 +1176,8 @@ static void key_event(SDL_Scancode sc, int down, int repeat, SDL_Keymod mod) {
         }
         return;
     }
-    if (sc == SDL_SCANCODE_F1 || sc == SDL_SCANCODE_F6 || joyride_overlay_open()) {   /* F6 in play: the pause menu */
+    if (sc == SDL_SCANCODE_F1 || sc == SDL_SCANCODE_F6 || sc == SDL_SCANCODE_ESCAPE || joyride_overlay_open() ||
+        ((sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER) && joyride_quit_asking())) {   /* F6, Esc in play: the pause menu */
         if (joyride_overlay_key((int)sc, down, repeat)) return;
     }
     if (sc == SDL_SCANCODE_F7 || sc == SDL_SCANCODE_F8) {   /* debugging (debug.c) */

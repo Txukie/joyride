@@ -84,6 +84,7 @@ int  joyride_savegame_save(char *msg, size_t n);/* 1 saved; msg says what happen
 int  joyride_savegame_mission_secs(void);      /* since the mission under way started, -1 none */
 /* the pause menu (overlay.c) */
 void joyride_pause_toggle(void);
+int  joyride_quit_asking(void);                 /* the game's "Ya want out?" is up, from the menu's Quit */
 int  joyride_pad_in_play(void);
 void joyride_screen_snapshot(const char *dir);     /* the next frame presented, saved there */                /* each pump: the pad in menus (pad.c) */
 void joyride_map_init(const char *install_root, const char *data_dir);

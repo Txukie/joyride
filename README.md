@@ -71,8 +71,9 @@ out of sight at the screen's real edges. Menus stay 640×480.
   the host's choice is everyone's, for the whole game.
 
 **Pause menu and saving (Start, or F6).** GTA never let you save; joyride
-does. In play, Start (F6 on the keyboard) pauses with *Continue*, *Save game*
-and *Quit* (the level ends, as with the game's own Esc). One save per
+does. In play, Start (F6 or Esc on the keyboard) pauses with *Continue*, *Save
+game* and *Quit* (the game asks "Ya want out?": Enter or A ends the level,
+Esc or B plays on). Esc no longer ends a level by itself. One save per
 character and level (each city's chapter), in
 `~/.local/share/joyride/saves/`: your score and its multiplier, your
 weapons' ammunition and the missions you have passed. Starting that level
@@ -217,7 +218,7 @@ the next model the city has (all but the tank). See
 | F7 | debug report (as L4) |
 | F8 | all weapons, next vehicle (as L5) |
 | F11, Alt+Enter | fullscreen |
-| Esc, then Enter | quit (the game's own menu); closing the window twice also quits |
+| Esc | the pause menu in play (Quit there ends the level, after the game's question); in the menus, back |
 
 ## Approach
 
