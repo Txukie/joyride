@@ -31,6 +31,7 @@
 #define CMD_DONOWT 17
 #define MARK_ON 31961
 #define MARK_OFF 31960
+#define DRIVEBY_GAP 12      /* pixels beyond the car's side the shot starts */
 
 static int g_on;                         /* the mission's switch */
 static uint32_t g_ped;                   /* guest memory for the ped's copy */
@@ -82,10 +83,15 @@ void joyride_driveby(uint32_t car) {
     if (!g_ped) g_ped = hle_va(hle_alloc(256));
     if (!g_ped) return;
     for (uint32_t i = 0; i < 256; i += 4) MEM32(g_ped + i) = MEM32(p + i);
-    int h = MEM16(car + 0x268) & 0x3FF, w = (int16_t)MEM16(car + 0x28), len = (int16_t)MEM16(car + 0x2A) + 2;
-    int a = h * 4, b = ((h + 0x100) & 0x3FF) * 4;
-    int32_t x = (int32_t)MEM32(0x511E28u + a) * w + (int32_t)MEM32(0x511E28u + b) * len + (int32_t)MEM32(car + 0x250);
-    int32_t y = (int32_t)MEM32(0x512228u + a) * w + (int32_t)MEM32(0x512228u + b) * len + (int32_t)MEM32(car + 0x254);
+    /* outside the car's right side, facing 45 degrees forward of it. The
+     * heading h faces (sin h, cos h) (the tables 0x511E28 and 0x512228, 16.16)
+     * and rises turning left, so the right is h - 0x100; the car's half
+     * width is +0x8A (pixels), and the shot starts that far out plus a
+     * margin, by the middle of the car's length */
+    int h = MEM16(car + 0x268) & 0x3FF, side = (int16_t)MEM16(car + 0x8A) + DRIVEBY_GAP;
+    int rgt = ((h - 0x100) & 0x3FF) * 4;
+    int32_t x = (int32_t)MEM32(0x511E28u + rgt) * side + (int32_t)MEM32(car + 0x250);
+    int32_t y = (int32_t)MEM32(0x512228u + rgt) * side + (int32_t)MEM32(car + 0x254);
     MEM32(g_ped + 0x90) = (uint32_t)x, MEM32(g_ped + 0x94) = (uint32_t)y, MEM32(g_ped + 0x98) = MEM32(car + 0x258);
     MEM16(g_ped + 0xA8) = (uint16_t)((h - 0x80) & 0x3FF);
     MEM8(g_ped + 0x49) = 100;
@@ -100,6 +106,7 @@ void joyride_driveby(uint32_t car) {
     MEM16(g_ped + 0x64) = 0;                              /* ready: the reload is kept here, per player */
     uint32_t arg = g_ped;
     hle_call_guest(0x4532F0, 1, &arg);
+    MEM8(p + 0x46) = 0;                                   /* one shot a press: in a car the game never clears it */
     int16_t r = (int16_t)MEM16(g_ped + 0x64);
     g_reload[player] = r > 0 ? r : 0;
 }
