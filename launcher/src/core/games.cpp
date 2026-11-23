@@ -40,16 +40,10 @@ const char *const kGtaExeSha1 = "d36976d66599cd649bf24f8ccd45bda84c0ee3f8";
 
 const std::vector<GameInfo> &games() {
     static const std::vector<GameInfo> g = {
-        { "gta1", "Grand Theft Auto", "1997 \xc2\xb7 Liberty City, San Andreas, Vice City",
-          "",
-          "762e03126a226e92e2f6827ca0750489595b52b2", "", true },
-        { "london1969", "GTA: London 1969", "Mission Pack #1 \xc2\xb7 1999", "", "", "gta1", true },
-        { "london1961", "GTA: London 1961", "Mission Pack #2 \xc2\xb7 1999 \xc2\xb7 freeware",
-          "",
-          "f549a46ae1c98b3cd475f5428ab1f2632addd6f9", "london1969", true },
-        { "gta2", "Grand Theft Auto 2", "1999 \xc2\xb7 coming later",
-          "",
-          "8c10c0d20f15912a9450b6fbe028f31928b29893", "", false },
+        { "gta1", "Grand Theft Auto", "1997 \xc2\xb7 Liberty City, San Andreas, Vice City", "", true },
+        { "london1969", "GTA: London 1969", "Mission Pack #1 \xc2\xb7 1999", "gta1", true },
+        { "london1961", "GTA: London 1961", "Mission Pack #2 \xc2\xb7 1999", "london1969", true },
+        { "gta2", "Grand Theft Auto 2", "1999 \xc2\xb7 coming later", "", false },
     };
     return g;
 }
@@ -103,7 +97,7 @@ static bool isGtaInstall(const fs::path &d) {
            !find(d, "GTADATA").empty();
 }
 
-// ---- SHA-1 (for the downloads and the executable) ---------------------------
+// ---- SHA-1 (for the executable) ----------------------------------------------
 
 namespace {
 struct Sha1 {
@@ -320,7 +314,7 @@ static bool installGta(const fs::path &src, std::string &err, const Log &log, co
         if (!isGtaInstall(src)) { err = src.string() + " has no WINO/Grand Theft Auto.exe and GTADATA/"; return false; }
         writeFile(d / "location", fs::absolute(src).string() + "\n");
         log("Using the install at " + src.string());
-    } else {                                             // the freeware installer
+    } else {                                             // the 2002 installer
         fs::path tmp = d / "unpack";
         fs::remove_all(tmp, ec);
         log("Unpacking " + src.filename().string());

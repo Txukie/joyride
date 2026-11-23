@@ -13,8 +13,6 @@ using Progress = std::function<void(double)>;          // 0..1 of the current st
 struct GameInfo {
     std::string id;           // gta1, london1969, london1961, gta2
     std::string title, subtitle;
-    std::string url;          // the official freeware download, if there is one
-    std::string sha1;         // of that download
     std::string needs;        // the game it is an expansion of ("" none)
     bool playable;            // joyride runs it
 };
@@ -35,9 +33,9 @@ std::vector<std::string> steamGtaInstalls();
 extern const char *const kGtaExeSha1;
 std::string sha1File(const std::string &path);
 
-// Installing. `source` is a downloaded or chosen file, or a folder. Each
+// Installing. `source` is a file or a folder of the player's own. Each
 // returns false with `err` set; they write under gameDir(id).
-//   gta1: the freeware installer (GTAINSTALLER.exe), or an install folder
+//   gta1: the 2002 installer (GTAINSTALLER.exe), or an install folder
 //         (Steam, or one made by the installer), used where it is
 //   london1969: the disc as BIN/CUE or ISO, or a folder (a mounted disc)
 //   london1961: its installer (GTAL1961.EXE)

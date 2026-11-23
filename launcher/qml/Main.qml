@@ -148,7 +148,7 @@ ApplicationWindow {
             function startAction() { if (playBtn.visible && playBtn.enabled) playBtn.clicked() }
             // the first thing to do here takes the focus: Play, else Download, else the Steam copy, else a file
             function focusFirst() {
-                var order = [playBtn, dlBtn, steamRepeater.count ? steamRepeater.itemAt(0) : null, fileBtn, removeBtn]
+                var order = [playBtn, steamRepeater.count ? steamRepeater.itemAt(0) : null, fileBtn, removeBtn]
                 for (var i = 0; i < order.length; i++)
                     if (order[i] && order[i].visible && order[i].enabled) { order[i].forceActiveFocus(); return }
             }
@@ -168,8 +168,9 @@ ApplicationWindow {
                           !gp.game.playable ? "joyride does not play this one yet." :
                           gp.game.installed ? "Installed in " + gp.game.playDir :
                           !gp.game.needsMet ? "Needs " + gp.game.needsTitle + " installed first." :
-                          gp.gameId === "london1969" ? "London 1969 was never released as freeware: install it from your own disc (a BIN/CUE or ISO image, or the disc itself)." :
-                          gp.game.canDownload ? "Rockstar released it as freeware: install it from a copy you have." : ""
+                          gp.gameId === "london1969" ? "Install it from your own disc: a BIN/CUE or ISO image, or the disc itself." :
+                          gp.gameId === "london1961" ? "Install it from your copy of its installer, GTAL1961.EXE." :
+                          "Install it from your own copy: a Steam install, an install folder or the 2002 installer."
                 }
                 ColumnLayout {
                     id: actions
@@ -181,7 +182,7 @@ ApplicationWindow {
                         primary: true
                         visible: gp.game && gp.game.installed && gp.game.playable
                         enabled: backend.joyrideReady
-                        KeyNavigation.down: dlBtn.visible ? dlBtn : steamRepeater.count ? steamRepeater.itemAt(0) : fileBtn
+                        KeyNavigation.down: steamRepeater.count ? steamRepeater.itemAt(0) : fileBtn
                         onClicked: backend.play(gp.gameId)
                     }
                     Text {
@@ -190,22 +191,12 @@ ApplicationWindow {
                         color: win.dim
                         font.pixelSize: 16
                     }
-                    BigButton {
-                        id: dlBtn
-                        text: gp.game && gp.game.installed ? "Download and install again" : "Download"
-                        primary: !playBtn.visible
-                        visible: gp.game && gp.game.canDownload && gp.game.playable
-                        enabled: gp.game && gp.game.needsMet
-                        KeyNavigation.up: playBtn
-                        KeyNavigation.down: steamRepeater.count ? steamRepeater.itemAt(0) : fileBtn
-                        onClicked: backend.download(gp.gameId)
-                    }
                     Repeater {
                         id: steamRepeater
                         model: gp.gameId === "gta1" ? backend.steamInstalls : []
                         BigButton {
                             text: "Use the Steam copy (" + modelData + ")"
-                            KeyNavigation.up: index > 0 ? steamRepeater.itemAt(index - 1) : (dlBtn.visible ? dlBtn : playBtn)
+                            KeyNavigation.up: index > 0 ? steamRepeater.itemAt(index - 1) : playBtn
                             KeyNavigation.down: index + 1 < steamRepeater.count ? steamRepeater.itemAt(index + 1) : fileBtn
                             onClicked: backend.installFrom("gta1", modelData)
                         }
@@ -215,7 +206,7 @@ ApplicationWindow {
                         text: "Install from a file or folder…"
                         visible: gp.game && gp.game.playable
                         enabled: gp.game && gp.game.needsMet
-                        KeyNavigation.up: steamRepeater.count ? steamRepeater.itemAt(steamRepeater.count - 1) : dlBtn.visible ? dlBtn : playBtn
+                        KeyNavigation.up: steamRepeater.count ? steamRepeater.itemAt(steamRepeater.count - 1) : playBtn
                         KeyNavigation.down: removeBtn
                         onClicked: stack.push(browsePage, { gameId: gp.gameId })
                     }

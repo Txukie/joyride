@@ -4,11 +4,9 @@
 #include "../core/games.h"
 
 #include <QCoreApplication>
-#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QNetworkReply>
 #include <QProcessEnvironment>
 #include <QStandardPaths>
 #include <QThread>
@@ -58,7 +56,6 @@ QVariantList Backend::games() const {
         m["installed"] = jl::installed(g.id);
         m["playDir"] = q(jl::playDir(g.id));
         m["playable"] = g.playable;
-        m["canDownload"] = !g.url.empty();
         m["needs"] = q(g.needs);
         const jl::GameInfo *n = g.needs.empty() ? nullptr : jl::game(g.needs);
         m["needsTitle"] = n ? q(n->title) : QString();
@@ -99,58 +96,6 @@ void Backend::clearError() {
     emit busyChanged();
 }
 
-void Backend::download(const QString &id) {
-    const jl::GameInfo *g = jl::game(s(id));
-    if (!g || g->url.empty() || busy()) return;
-    begin("Downloading " + q(g->title));
-    QDir().mkpath(q(jl::dataRoot()) + "/downloads");
-    QString file = q(jl::dataRoot()) + "/downloads/" + QUrl(q(g->url)).fileName();
-    QString want = q(g->sha1);
-    // already here and whole: straight on
-    QFile have(file);
-    if (have.open(QIODevice::ReadOnly)) {
-        QCryptographicHash h(QCryptographicHash::Sha1);
-        h.addData(&have);
-        if (h.result().toHex() == want.toLatin1()) {
-            addLog("Already downloaded: " + file);
-            runInstall(id, file);
-            return;
-        }
-    }
-    addLog("From " + q(g->url));
-    auto *out = new QFile(file + ".part", this);
-    if (!out->open(QIODevice::WriteOnly)) { delete out; end(false, "cannot write " + file); return; }
-    QNetworkRequest req{ QUrl(q(g->url)) };
-    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-    req.setHeader(QNetworkRequest::UserAgentHeader, "joyride-launcher");
-    reply_ = net_.get(req);
-    connect(reply_, &QNetworkReply::readyRead, this, [this, out] { out->write(reply_->readAll()); });
-    connect(reply_, &QNetworkReply::downloadProgress, this, [this](qint64 a, qint64 b) { if (b > 0) setProgress(0.5 * a / b); });
-    connect(reply_, &QNetworkReply::finished, this, [this, out, file, want, id] {
-        out->write(reply_->readAll());
-        out->close();
-        bool ok = reply_->error() == QNetworkReply::NoError;
-        QString why = reply_->errorString();
-        reply_->deleteLater(), reply_ = nullptr;
-        out->deleteLater();
-        if (!ok) { QFile::remove(file + ".part"); end(false, "download failed: " + why); return; }
-        QFile f(file + ".part");
-        if (!f.open(QIODevice::ReadOnly)) { end(false, "cannot read the download back"); return; }
-        QCryptographicHash h(QCryptographicHash::Sha1);
-        h.addData(&f);
-        f.close();
-        if (h.result().toHex() != want.toLatin1()) {
-            QFile::remove(file + ".part");
-            end(false, "the download is not the expected file (SHA-1 differs)");
-            return;
-        }
-        QFile::remove(file);
-        QFile::rename(file + ".part", file);
-        addLog("Downloaded and checked: " + file);
-        runInstall(id, file);
-    });
-}
-
 void Backend::installFrom(const QString &id, const QString &path) {
     if (busy()) return;
     const jl::GameInfo *g = jl::game(s(id));
@@ -160,7 +105,7 @@ void Backend::installFrom(const QString &id, const QString &path) {
 
 // the installing itself, off the interface's thread
 void Backend::runInstall(const QString &id, const QString &path) {
-    double base = progress_ > 0 ? 0.5 : 0, span = 1 - base;
+    double base = 0, span = 1;
     QThread *t = QThread::create([this, id, path, base, span] {
         std::string err;
         auto log = [this](const std::string &l) { QMetaObject::invokeMethod(this, [this, l] { addLog(q(l)); }); };
@@ -184,7 +129,6 @@ void Backend::uninstall(const QString &id) {
 }
 
 void Backend::cancel() {
-    if (reply_) reply_->abort();
     if (proc_) proc_->kill();
 }
 
@@ -333,8 +277,8 @@ QStringList Backend::sourceFilters(const QString &id) const {
     return {};
 }
 QString Backend::sourceHint(const QString &id) const {
-    if (id == "gta1") return "GTAINSTALLER.exe (the Rockstar freeware download), or a folder holding WINO and GTADATA (Steam's, say): open the folder and choose “Use this folder”.";
+    if (id == "gta1") return "GTAINSTALLER.exe (the 2002 Rockstar installer), or a folder holding WINO and GTADATA (Steam's, say): open the folder and choose “Use this folder”.";
     if (id == "london1969") return "Your London 1969 disc: a .cue (with its .bin beside it), an .iso, or the mounted disc's folder.";
-    if (id == "london1961") return "GTAL1961.EXE, the Rockstar freeware download.";
+    if (id == "london1961") return "GTAL1961.EXE, London 1961's installer.";
     return "";
 }

@@ -1,6 +1,6 @@
 // joyride launcher - InstallShield 5 cabinets.
 //
-// The layout (as unshield reads it, checked against the freeware GTA
+// The layout (as unshield reads it, checked against the 2002 GTA
 // installer, two volumes, and London 1961's and the London 1969 disc's, one):
 //   common header, 20 bytes: "ISc(", version, volume info, the offset and
 //     size of the cabinet descriptor (data1.cab only)

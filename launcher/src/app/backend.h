@@ -1,8 +1,7 @@
 // joyride launcher - what the QML front end drives: the games and their
-// state, installing (a download or a chosen file), preparing joyride (the
+// state, installing (from the player's own copy), preparing joyride (the
 // recompilation, from GTA's executable), the settings, playing.
 #pragma once
-#include <QNetworkAccessManager>
 #include <QObject>
 #include <QProcess>
 #include <QStringList>
@@ -37,7 +36,6 @@ public:
     bool playing() const { return playing_; }
     QString backdrop() const;                                       // the menus' wide picture, if the player has one
 
-    Q_INVOKABLE void download(const QString &id);                  // the official freeware, then install
     Q_INVOKABLE void installFrom(const QString &id, const QString &path);
     Q_INVOKABLE void uninstall(const QString &id);
     Q_INVOKABLE void prepare();                                     // build joyride from GTA's executable
@@ -74,8 +72,6 @@ private:
     QString cfgPath() const;
     QMap<QString, QString> readCfg() const;
 
-    QNetworkAccessManager net_;
-    QNetworkReply *reply_ = nullptr;
     QProcess *proc_ = nullptr;
     QList<QPair<QString, QStringList>> steps_;
     QString task_, error_;

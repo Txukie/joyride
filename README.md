@@ -202,7 +202,7 @@ the next model the city has (all but the tank). See
 ## Approach
 
 1. **Load** `WINO/Grand Theft Auto.exe` (PE32, MSVC 6, Nov 2002) — the build
-   shipped on Steam and as the free Rockstar Classics download.
+   shipped on Steam and as the 2002 Rockstar Classics release.
 2. **Analyse** — discover functions, jump tables and indirect-call targets;
    track progress in a function database.
 3. **Translate** each x86 function to C++ against a guest CPU context and a
@@ -217,13 +217,14 @@ the next model the city has (all but the tank). See
 for keys and mouse (Qt Quick; controllers through SDL3: d-pad or stick
 move, A chooses, B goes back, Start plays):
 
-* **Grand Theft Auto** — uses a Steam copy it
-  finds, or an installer or install folder you choose.
+The launcher downloads nothing: every game comes from a copy you own.
+
+* **Grand Theft Auto** — a Steam copy it finds, or an install folder or the
+  2002 installer (`GTAINSTALLER.exe`) you choose.
 * **GTA: London 1969** — from your own disc: a BIN/CUE image (its music is
-  taken from the audio tracks), an ISO, or the mounted disc. It was never
-  released as freeware, so the launcher does not download it.
-* **GTA: London 1961** — uses
-  your copy of `GTAL1961.EXE`. Needs London 1969.
+  taken from the audio tracks), an ISO, or the mounted disc.
+* **GTA: London 1961** — from your copy of its installer, `GTAL1961.EXE`.
+  Needs London 1969.
 * **Grand Theft Auto 2** — listed, not playable yet.
 * **Prepare joyride** runs `tools/lift.sh` on your GTA executable and the
   build (once, a few minutes); **Settings** edits the same
@@ -275,12 +276,12 @@ steps a second, every 5 s; steps should hold 23.3).
 ## Supported game data
 
 The game data is identical between the original CD, the Steam release and the
-free 2002 Rockstar Classics release (apart from saves), so any of them works. See
+2002 Rockstar Classics release (apart from saves), so any of them works. See
 [`docs/sources.md`](docs/sources.md).
 
 | Source | Executable used for recompilation | Music |
 | --- | --- | --- |
-| Steam / Rockstar freeware (2002) | **`WINO/Grand Theft Auto.exe`** | `Music/Track1–10.wav` |
+| Steam / Rockstar Classics (2002) | **`WINO/Grand Theft Auto.exe`** | `Music/Track1–10.wav` |
 | Original CD (1997) | data only (its 1997 exe is not the target) | CD audio tracks 2–11 |
 
 ## License

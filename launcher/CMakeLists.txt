@@ -1,4 +1,5 @@
-# joyride launcher: installs the games (your own copies), builds joyride from GTA's executable, sets it up and
+# joyride launcher: installs the games from your own copies (a Steam
+# install, an installer, a disc image), builds joyride from GTA's executable, sets it up and
 # starts it. Separate from joyride's own build, which needs the generated
 # code first:
 #   cmake -S launcher -B build-launcher -G Ninja && cmake --build build-launcher
@@ -27,7 +28,7 @@ add_executable(joyride-setup src/cli/main.cpp)
 target_link_libraries(joyride-setup PRIVATE joyride_setup)
 
 # the launcher itself: Qt Quick, controllers through SDL3
-find_package(Qt6 6.5 COMPONENTS Quick QuickControls2 Network)
+find_package(Qt6 6.5 COMPONENTS Quick QuickControls2)
 find_package(SDL3 CONFIG)
 if(Qt6_FOUND AND SDL3_FOUND)
     qt_standard_project_setup(REQUIRES 6.5)
@@ -39,11 +40,11 @@ if(Qt6_FOUND AND SDL3_FOUND)
         URI JoyrideLauncher
         VERSION 1.0
         QML_FILES qml/Main.qml qml/BigButton.qml qml/GameCard.qml)
-    target_link_libraries(joyride-launcher PRIVATE joyride_setup Qt6::Quick Qt6::QuickControls2 Qt6::Network SDL3::SDL3)
+    target_link_libraries(joyride-launcher PRIVATE joyride_setup Qt6::Quick Qt6::QuickControls2 SDL3::SDL3)
     # where joyride's checkout is: preparing runs its tools/lift.sh and build
     get_filename_component(JOYRIDE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
     target_compile_definitions(joyride-launcher PRIVATE JOYRIDE_SOURCE_DIR="${JOYRIDE_SOURCE_DIR}")
     target_compile_options(joyride-launcher PRIVATE -Wall -Wextra)
 else()
-    message(WARNING "Qt 6 (Quick, QuickControls2, Network) or SDL3 not found: only joyride-setup is built")
+    message(WARNING "Qt 6 (Quick, QuickControls2) or SDL3 not found: only joyride-setup is built")
 endif()

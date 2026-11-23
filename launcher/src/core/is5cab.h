@@ -1,5 +1,5 @@
 // joyride launcher - InstallShield 5 cabinets: data1.cab (its header inside)
-// and any further volumes data2.cab, ... beside it, as the GTA freeware and
+// and any further volumes data2.cab, ... beside it, as the 2002 GTA and
 // London installers have them.
 #pragma once
 #include <cstdint>
