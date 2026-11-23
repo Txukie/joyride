@@ -43,6 +43,8 @@
 #include "joyride_hle.h"
 
 int joyride_hwrender;                  /* the overlay's "Renderer: GPU" */
+extern uint32_t joyride_texclamp;      /* texfilter.c: the polygon drawn is a tile (lid) */
+#define LID_GROW 0.6f                  /* pixels a lid is drawn past each side: no seams */
 
 #define MAXQ 8192
 static joyride_quad g_q[MAXQ];
@@ -124,6 +126,21 @@ static void corner(joyride_quad *q, int i, float x, float y, float u, float v) {
     q->x[i] = x, q->y[i] = y, q->u[i] = u, q->v[i] = v;
 }
 
+/* A tile's quad (a lid, a wall, a floor's spans) grows a little past its
+ * corners: the game works out each tile's corners on its own, rounded, and
+ * draws its last row and column, so two neighbours can miss each other by a
+ * pixel; on the GPU the gap showed as a dark line across water and roads.
+ * Overlapping by a fraction of a pixel does not show. Not sprites. */
+static void grow(joyride_quad *q) {
+    float cx = 0, cy = 0;
+    for (int i = 0; i < 4; i++) cx += q->x[i], cy += q->y[i];
+    cx /= 4, cy /= 4;
+    for (int i = 0; i < 4; i++) {
+        q->x[i] += q->x[i] > cx ? LID_GROW : q->x[i] < cx ? -LID_GROW : 0;
+        q->y[i] += q->y[i] > cy ? LID_GROW : q->y[i] < cy ? -LID_GROW : 0;
+    }
+}
+
 /* 0x496CF0's entry: 1 = captured (the fill is skipped) */
 int joyride_hw_polygon(void) {
     if (!g_drawing) return 0;
@@ -138,6 +155,7 @@ int joyride_hw_polygon(void) {
         corner(q, (int)i, (float)(int16_t)MEM16(p + 0x10 + 4 * k), (float)(int16_t)MEM16(p + 0x12 + 4 * k),
                (float)MEM8(p + 0x20 + 2 * k) + 0.5f, (float)MEM8(p + 0x21 + 2 * k) + 0.5f);   /* texel centres */
     }
+    if (joyride_texclamp) grow(q);                          /* a lid (the tiles' entry, 0x497710, sets the clamp) */
     return 1;
 }
 
@@ -162,6 +180,7 @@ int joyride_hw_hwall(void) {
     corner(q, 1, (float)c64, (float)c70, ur, oy);
     corner(q, 2, (float)c6c, (float)c74, ur, oy + 64);
     corner(q, 3, (float)c68, (float)c74, ul, oy + 64);
+    grow(q);
     return 1;
 }
 
@@ -179,6 +198,7 @@ int joyride_hw_vwall(void) {
     corner(q, 1, (float)c64, (float)c74, ut, oy + 64);
     corner(q, 2, (float)c64, (float)c7c, ub, oy + 64);
     corner(q, 3, (float)c60, (float)c78, ub, oy);
+    grow(q);
     return 1;
 }
 
