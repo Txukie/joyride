@@ -36,10 +36,14 @@
  *   - a save during a mission keeps the score and weapons of the moment and
  *     the counters of the checkpoint: the pause menu warns first, with the
  *     time since the mission started.
- * Taking a phone's job also takes the phone out of the city (TELEPHONE
- * objects, type 7: +4, the world object, becomes -1); the phones taken at
- * the checkpoint are kept too, and removed from the fresh city on loading
- * (0x44EB90, the game's removal of a world object).
+ * Taking a phone's job also lets go of the phone (TELEPHONE objects, type
+ * 7: +4, the booth's world object, becomes -1; the booth stays): kept, and
+ * let go of again on loading. And the script's processes (32, each a
+ * place in the script and some state; 0x6761C0..) and its commands' state
+ * (timers, what each waits on; 0x676660, 24 bytes each): after the first
+ * mission its main loop is another one, further on. These are kept as they
+ * are once the checkpoint has settled (5 s after the level's start or a
+ * pass: the script back to waiting) and put back on loading.
  * Put back, the counters and phones let the script's own loops offer the
  * next jobs (a failed one is offered again: it was not passed).
  *
@@ -57,7 +61,7 @@
 #include "joyride_hle.h"
 
 #define MAGIC "JRSV"
-#define VERSION 3u               /* 1: no counters, 2: no phones (both still read) */
+#define VERSION 4u               /* 1: no counters, 2: no phones, 3: no processes (all still read) */
 #define MAXPHONE 512
 #define MAXCOUNT 256
 
@@ -65,6 +69,18 @@
 #define MAXOBJ 4096u
 #define LINES 0x6561C0u          /* script line -> object, int16, -1 none */
 #define NLINES 65536u
+#define CMDS 0x676660u           /* the script's commands, 24 bytes each */
+#define CMDLINES 0x693B30u       /* script line -> command, int16 */
+#define MAXCMD 8192u
+
+/* the script's processes, 32 of them: each array by process (0x448EDD,
+ * KICKSTART, fills them; 0x44919D, KILL_PROCESS, empties them) */
+static const struct { uint32_t va, size; } k_proc[] = {
+    { 0x6761C0, 2 }, { 0x676620, 2 }, { 0x6560B8, 2 }, { 0x676348, 2 }, { 0x656180, 2 },
+    { 0x6B3DE8, 2 }, { 0x676280, 2 }, { 0x676200, 4 }, { 0x6762C8, 4 },
+};
+#define NPROCARR (sizeof k_proc / sizeof *k_proc)
+#define PROCBYTES (32u * (2u * 7u + 4u * 2u))
 enum { T_TELEPHONE = 7, T_COUNTER = 12, T_MISSIONS = 66, T_SECRETS = 67 };
 
 typedef struct {
@@ -93,6 +109,17 @@ static int g_np;
 static uint32_t g_pobj[MAXPHONE];
 static int32_t g_pline[MAXPHONE];
 static uint8_t g_pgone[MAXPHONE];
+/* this level's processes and commands at the checkpoint */
+static uint8_t g_cproc[PROCBYTES];
+static uint8_t *g_ccmd;
+static uint32_t g_ncmd;
+/* a save's processes and commands, waiting for the level's start-up to end
+ * (its first processes are kicked off over its first seconds) */
+static uint8_t *g_pend_proc, *g_pend_cmd;
+static uint64_t g_level_t0, g_stable_t0;
+static uint32_t g_stable_sig;
+#define STARTUP_MIN_MS 3000      /* not before */
+#define STARTUP_STILL_MS 2500    /* the processes running unchanged that long */
 static uint64_t g_started;       /* when a mission started (ms); 0: none since the checkpoint */
 static uint64_t g_settle;        /* until then (ms) the checkpoint follows the counters */
 #define SETTLE_MS 5000           /* a level's first lines, a pass's tidying up */
@@ -147,9 +174,34 @@ static void find_counters(void) {
 
 static int phone_gone(int i) { return (int32_t)MEM32(g_pobj[i] + 4) < 0; }
 
+/* the number of the script's commands: one past the highest a line names */
+static uint32_t count_cmds(void) {
+    int32_t hi = -1;
+    for (uint32_t line = 0; line < NLINES; line++) {
+        int32_t c = (int16_t)MEM16(CMDLINES + 2 * line);
+        if (c > hi) hi = c;
+    }
+    return hi < 0 ? 0 : (uint32_t)hi + 1 > MAXCMD ? MAXCMD : (uint32_t)hi + 1;
+}
+
+/* the processes and commands: taken, put back */
+static void take_script(uint8_t *proc, uint8_t *cmds) {
+    size_t o = 0;
+    for (size_t k = 0; k < NPROCARR; k++)
+        for (uint32_t i = 0; i < 32u * k_proc[k].size; i++) proc[o++] = MEM8(k_proc[k].va + i);
+    for (uint32_t i = 0; i < g_ncmd * 24u; i++) cmds[i] = MEM8(CMDS + i);
+}
+static void put_script(const uint8_t *proc, const uint8_t *cmds) {
+    size_t o = 0;
+    for (size_t k = 0; k < NPROCARR; k++)
+        for (uint32_t i = 0; i < 32u * k_proc[k].size; i++) MEM8(k_proc[k].va + i) = proc[o++];
+    for (uint32_t i = 0; i < g_ncmd * 24u; i++) MEM8(CMDS + i) = cmds[i];
+}
+
 static void checkpoint(int settle) {
     for (int i = 0; i < g_n; i++) g_check[i].a = (int32_t)MEM32(g_obj[i] + 4), g_check[i].b = (int32_t)MEM32(g_obj[i] + 8);
     for (int i = 0; i < g_np; i++) g_pgone[i] = (uint8_t)phone_gone(i);
+    if (g_ccmd) take_script(g_cproc, g_ccmd);
     g_started = 0;
     if (settle) g_settle = SDL_GetTicks() + SETTLE_MS;
 }
@@ -190,8 +242,11 @@ static int write_save(char *msg, size_t n, const char *what) {
     uint32_t ngone = 0;
     for (int i = 0; i < g_np; i++)
         if (g_pgone[i]) gone[ngone++] = g_pline[i];
+    uint32_t ncmd = g_ccmd ? g_ncmd : 0;
     int ok = f && fwrite(&s, sizeof s, 1, f) == 1 && fwrite(g_check, sizeof *g_check, (size_t)g_n, f) == (size_t)g_n &&
-             fwrite(&ngone, 4, 1, f) == 1 && fwrite(gone, 4, ngone, f) == ngone;
+             fwrite(&ngone, 4, 1, f) == 1 && fwrite(gone, 4, ngone, f) == ngone &&
+             fwrite(&ncmd, 4, 1, f) == 1 && (!ncmd || (fwrite(g_cproc, 1, PROCBYTES, f) == PROCBYTES &&
+                                                       fwrite(g_ccmd, 24, ncmd, f) == ncmd));
     if (f && fclose(f)) ok = 0;
     if (!ok || rename(tmp, path)) {
         snprintf(msg, n, "Save failed: %s", strerror(errno));
@@ -262,16 +317,24 @@ static void load(void) {
             int32_t o = (int16_t)MEM16(LINES + 2 * (uint32_t)line);
             if (o < 0 || (uint32_t)o >= MAXOBJ) continue;
             uint32_t a = OBJS + (uint32_t)o * 32u;
-            int32_t ent = (int32_t)MEM32(a + 4);
-            if ((int32_t)MEM32(a) != T_TELEPHONE || ent < 0) continue;
-            uint32_t arg = (uint32_t)ent;
-            hle_call_guest(0x44EB90, 1, &arg);                /* the game's own removal of a world object */
-            MEM32(a + 4) = 0xFFFFFFFFu;
+            if ((int32_t)MEM32(a) != T_TELEPHONE || (int32_t)MEM32(a + 4) < 0) continue;
+            MEM32(a + 4) = 0xFFFFFFFFu;                       /* as the game does: the booth stays in the city */
             taken++;
         }
     }
+    int procs = 0;
+    uint32_t ncmd = 0;
+    if (s.version >= 4 && fread(&ncmd, 4, 1, f) == 1 && ncmd && ncmd == count_cmds()) {
+        uint8_t *proc = malloc(PROCBYTES), *cmds = malloc((size_t)ncmd * 24u);
+        if (proc && cmds && fread(proc, 1, PROCBYTES, f) == PROCBYTES && fread(cmds, 24, ncmd, f) == ncmd) {
+            g_pend_proc = proc, g_pend_cmd = cmds, proc = cmds = NULL;   /* put back once the start-up is over */
+            procs = 1;
+        }
+        free(proc), free(cmds);
+    }
     fclose(f);
-    fprintf(stderr, "[save] loaded %s: %d points x%d, %d counters, %d phones taken\n", path, s.score, s.multiplier, put, taken);
+    fprintf(stderr, "[save] loaded %s: %d points x%d, %d counters, %d phones taken, processes %s\n", path, s.score,
+            s.multiplier, put, taken, procs ? "to put back after the start-up" : "not in the save");
 }
 
 /* ---- each step ---------------------------------------------------------------- */
@@ -281,12 +344,31 @@ void joyride_savegame_menus(void) { g_menus = 1; }
 void joyride_savegame_step(void) {
     if (g_menus) {                                        /* the first step of a level */
         g_menus = 0;
+        g_ncmd = count_cmds();
+        free(g_ccmd);
+        g_ccmd = g_ncmd ? malloc((size_t)g_ncmd * 24u) : NULL;
+        free(g_pend_proc), free(g_pend_cmd);
+        g_pend_proc = g_pend_cmd = NULL;
+        g_level_t0 = g_stable_t0 = SDL_GetTicks(), g_stable_sig = 0;
         load();
         find_counters();
         checkpoint(1);
         return;
     }
     if (joyride_net_driveby() >= 0 || (int32_t)MEM32(0x6B3E28) <= 0) return;
+    if (g_pend_proc) {                                    /* the save's processes, once the start-up is over */
+        uint32_t sig = 2166136261u;
+        for (uint32_t i = 0; i < 32; i++) sig = (sig ^ MEM16(0x6761C0 + 2 * i)) * 16777619u;
+        uint64_t now = SDL_GetTicks();
+        if (sig != g_stable_sig) g_stable_sig = sig, g_stable_t0 = now;
+        if (now - g_level_t0 < STARTUP_MIN_MS || now - g_stable_t0 < STARTUP_STILL_MS) return;
+        put_script(g_pend_proc, g_pend_cmd);
+        free(g_pend_proc), free(g_pend_cmd);
+        g_pend_proc = g_pend_cmd = NULL;
+        checkpoint(1);
+        fprintf(stderr, "[save] processes put back\n");
+        return;
+    }
     int passed = 0, changed = 0;
     for (int i = 0; i < g_n; i++) {
         int32_t a = (int32_t)MEM32(g_obj[i] + 4), b = (int32_t)MEM32(g_obj[i] + 8), t = (int32_t)MEM32(g_obj[i]);
@@ -295,6 +377,11 @@ void joyride_savegame_step(void) {
     }
     for (int i = 0; i < g_np; i++)
         if (phone_gone(i) != g_pgone[i]) changed = 1;     /* a job's phone taken out: a mission starting */
+    if (g_settle && !g_started && SDL_GetTicks() >= g_settle) {   /* settled: the checkpoint as it is now */
+        checkpoint(0);
+        g_settle = 0;
+        return;
+    }
     if (passed) {                                         /* a mission passed: the new checkpoint */
         checkpoint(1);
         fprintf(stderr, "[save] a mission passed: checkpoint\n");
