@@ -66,6 +66,13 @@ int joyride_driveby_on(void) {
     return g_on || (net >= 0 ? net : joyride_cfg.driveby);
 }
 
+/* London (its maps in uk\\: uk.cmp, uke.cmp, mc.cmp; GTA's are nyc.cmp,
+ * sanb.cmp, miami.cmp), where they drive on the left */
+static int london(void) {
+    char c0 = (char)MEM8(0x6B3E88), c1 = (char)MEM8(0x6B3E89), c2 = (char)MEM8(0x6B3E8A);
+    return (c0 == 'u' || c0 == 'U') && (c1 == 'k' || c1 == 'K') && (c2 == '\\' || c2 == '/');
+}
+
 /* the car's step (pad.c's splice at 0x40A418) */
 void joyride_driveby(uint32_t car) {
     if (!joyride_driveby_on() || MEM16(car + 0x22) == 0x25) return;   /* the tank has its own gun */
@@ -83,17 +90,20 @@ void joyride_driveby(uint32_t car) {
     if (!g_ped) g_ped = hle_va(hle_alloc(256));
     if (!g_ped) return;
     for (uint32_t i = 0; i < 256; i += 4) MEM32(g_ped + i) = MEM32(p + i);
-    /* outside the car's right side, facing 45 degrees forward of it. The
-     * heading h faces (sin h, cos h) (the tables 0x511E28 and 0x512228, 16.16)
-     * and rises turning left, so the right is h - 0x100; the car's half
-     * width is +0x8A (pixels), and the shot starts that far out plus a
-     * margin, by the middle of the car's length */
+    /* out of the driver's window, the side facing the oncoming traffic: the
+     * left in GTA's American cities, the right in London (they drive on the
+     * left), facing 45 degrees forward of it. The heading h faces
+     * (sin h, cos h) (the tables 0x511E28 and 0x512228, 16.16) and rises
+     * turning left, so the left is h + 0x100 and the right h - 0x100; the
+     * car's half width is +0x8A (pixels), and the shot starts that far out
+     * plus a margin, by the middle of the car's length */
+    int turn = london() ? -0x100 : 0x100;
     int h = MEM16(car + 0x268) & 0x3FF, side = (int16_t)MEM16(car + 0x8A) + DRIVEBY_GAP;
-    int rgt = ((h - 0x100) & 0x3FF) * 4;
-    int32_t x = (int32_t)MEM32(0x511E28u + rgt) * side + (int32_t)MEM32(car + 0x250);
-    int32_t y = (int32_t)MEM32(0x512228u + rgt) * side + (int32_t)MEM32(car + 0x254);
+    int out = ((h + turn) & 0x3FF) * 4;
+    int32_t x = (int32_t)MEM32(0x511E28u + out) * side + (int32_t)MEM32(car + 0x250);
+    int32_t y = (int32_t)MEM32(0x512228u + out) * side + (int32_t)MEM32(car + 0x254);
     MEM32(g_ped + 0x90) = (uint32_t)x, MEM32(g_ped + 0x94) = (uint32_t)y, MEM32(g_ped + 0x98) = MEM32(car + 0x258);
-    MEM16(g_ped + 0xA8) = (uint16_t)((h - 0x80) & 0x3FF);
+    MEM16(g_ped + 0xA8) = (uint16_t)((h + turn / 2) & 0x3FF);
     MEM8(g_ped + 0x49) = 100;
     /* in a car the ped carries none: the player's current one (L1/R1 change
      * it while drive-bys are on, pad.c), else the first with ammunition */
