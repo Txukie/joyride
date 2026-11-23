@@ -295,7 +295,10 @@ static void load(void) {
     for (uint32_t i = 0; i < 4; i++) MEM8(r + 0x140 + i) = s.ammo[i];
     MEM32(r + 0x148) = s.weapon;
     int put = 0;
-    if (s.version >= 2) {
+    /* mission progress only from a save that has all of it (version 4): the
+     * counters and phones without the processes left the script waiting on
+     * a job already taken, and no job came */
+    if (s.version >= 4) {
         for (uint32_t k = 0; k < s.ncount && k < MAXCOUNT; k++) {
             counter_t c;
             if (fread(&c, sizeof c, 1, f) != 1) break;
@@ -310,7 +313,7 @@ static void load(void) {
     }
     int taken = 0;
     uint32_t ngone = 0;
-    if (s.version >= 3 && fread(&ngone, 4, 1, f) == 1) {  /* the phones whose jobs were taken: out of the city */
+    if (s.version >= 4 && fread(&ngone, 4, 1, f) == 1) {  /* the phones whose jobs were taken: out of the city */
         for (uint32_t k = 0; k < ngone && k < MAXPHONE; k++) {
             int32_t line;
             if (fread(&line, 4, 1, f) != 1 || line < 0 || (uint32_t)line >= NLINES) break;
