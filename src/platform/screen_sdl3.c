@@ -911,19 +911,71 @@ static int hud_boxes(const uint8_t *px, int w, int h, int pitch, const band_t *b
         int kk = k;
         while (kk > 1 && (o->w * kk > w || o->h * kk > h)) kk--;
         o->k = kk;
-        int dw = o->w * kk, dh = o->h * kk;
-        /* each piece's place is scaled about a point of the screen: the edge
-         * it is near (within 15% of the screen), else the middle, so the
-         * pieces around one point keep their layout, only larger (two
-         * lines of text keep their gap, the heads stay above the bar) */
+    }
+    /* Where each piece goes. One near an edge (within 15% of the screen)
+     * keeps its distance from that edge, scaled: the score in its corner,
+     * the heads above the area's name. The rest (messages: "MISSION
+     * COMPLETE!", "Game Paused" over "Secrets Found") go in groups, the
+     * lines one above another that belong together: each group grows about
+     * its own middle, its lines keeping their gaps, and is moved as a whole
+     * to stay on the screen; it stays where the game put it, not pushed
+     * away from the middle of the screen. */
+    int grp[HUD_MAXBOX];
+    for (int i = 0; i < n; i++) grp[i] = -1;
+    for (int i = 0; i < n; i++) {
+        hudbox_t *o = &box[i];
         int ax = o->x < w * 15 / 100 ? 0 : o->x + o->w > w * 85 / 100 ? w : w / 2;
         int ay = o->y < h * 15 / 100 ? 0 : o->y + o->h > h * 85 / 100 ? h : h / 2;
-        o->dx = ax + (o->x - ax) * kk;
-        o->dy = ay + (o->y - ay) * kk;
-        if (o->dx < 0) o->dx = 0;
-        if (o->dx + dw > w) o->dx = w - dw;
-        if (o->dy < 0) o->dy = 0;
-        if (o->dy + dh > h) o->dy = h - dh;
+        if (ay != h / 2 || ax != w / 2) {                 /* near an edge */
+            int dw = o->w * o->k, dh = o->h * o->k;
+            o->dx = ax + (o->x - ax) * o->k, o->dy = ay + (o->y - ay) * o->k;
+            if (o->dx < 0) o->dx = 0;
+            if (o->dx + dw > w) o->dx = w - dw;
+            if (o->dy < 0) o->dy = 0;
+            if (o->dy + dh > h) o->dy = h - dh;
+            continue;
+        }
+        grp[i] = i;                                       /* a message: its own group for now */
+    }
+    for (int again = 1; again;) {                         /* join the lines one above another */
+        again = 0;
+        for (int i = 0; i < n; i++)
+            for (int j = 0; j < n; j++) {
+                if (grp[i] < 0 || grp[j] < 0 || grp[i] == grp[j]) continue;
+                hudbox_t *a = &box[i], *b = &box[j];
+                int gap = a->y > b->y + b->h ? a->y - (b->y + b->h) : b->y > a->y + a->h ? b->y - (a->y + a->h) : 0;
+                int line = a->h > b->h ? a->h : b->h;
+                int overlap = a->x < b->x + b->w && b->x < a->x + a->w;
+                if (gap <= line && overlap) {
+                    int from = grp[j], to = grp[i];
+                    for (int m = 0; m < n; m++) if (grp[m] == from) grp[m] = to;
+                    again = 1;
+                }
+            }
+    }
+    for (int g = 0; g < n; g++) {
+        int x0 = w, y0 = h, x1 = 0, y1 = 0, kg = 64, any = 0;
+        for (int i = 0; i < n; i++) {
+            if (grp[i] != g) continue;
+            any = 1;
+            hudbox_t *o = &box[i];
+            if (o->x < x0) x0 = o->x;
+            if (o->y < y0) y0 = o->y;
+            if (o->x + o->w > x1) x1 = o->x + o->w;
+            if (o->y + o->h > y1) y1 = o->y + o->h;
+            if (o->k < kg) kg = o->k;
+        }
+        if (!any) continue;
+        while (kg > 1 && ((x1 - x0) * kg > w || (y1 - y0) * kg > h)) kg--;
+        int cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+        int nx0 = cx + (x0 - cx) * kg, ny0 = cy + (y0 - cy) * kg, nx1 = cx + (x1 - cx) * kg, ny1 = cy + (y1 - cy) * kg;
+        int sx = nx0 < 0 ? -nx0 : nx1 > w ? w - nx1 : 0, sy = ny0 < 0 ? -ny0 : ny1 > h ? h - ny1 : 0;
+        for (int i = 0; i < n; i++) {
+            if (grp[i] != g) continue;
+            hudbox_t *o = &box[i];
+            o->k = kg;
+            o->dx = cx + (o->x - cx) * kg + sx, o->dy = cy + (o->y - cy) * kg + sy;
+        }
     }
     return n;
 }
