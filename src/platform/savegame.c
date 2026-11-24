@@ -54,9 +54,11 @@
  * each car there before the mission (CAR, type 0, +4 its car), where it
  * stood and its model. A failure is the game's "MISSION FAILED!" or
  * "FRENZY FAILED!" (texts 2501 and 2504; the big message, 0x481320, sets
- * 0x785102 and copies its text to 0x77EC80): from then until the next
- * mission starts, the pause menu offers Retry. It takes the city back to
- * the checkpoint before the mission: what the mission made is taken away
+ * 0x785102 and copies its text to 0x77EC80). Once the message is gone, at
+ * least RETRY_MIN_MS after it came up and with the script's processes
+ * unchanged for STARTUP_STILL_MS (its way back to the phones over), the city
+ * goes back by itself to the checkpoint before the mission, so the player
+ * can go back to where it started and start it again: what the mission made is taken away
  * (its cars as KILL_CAR does, 0x43CE60 and 0x4773A0, unless someone is in
  * one; its people as KILL_PED, 0x477320 and 0x41A250, and off the list of
  * the mission's people), the objects, triggers, processes and commands are
@@ -167,7 +169,9 @@ typedef struct {
 static uint32_t g_nobj;          /* this level's objects */
 static int32_t *g_oline;         /* each one's script line */
 static city_t g_ccity, g_rcity;  /* at the checkpoint; the one a retry goes back to */
-static int g_retry, g_retry_req; /* a retry offered; asked for */
+static int g_retry;              /* a failed mission to put back */
+static uint64_t g_fail_t;        /* when it failed (ms) */
+#define RETRY_MIN_MS 5000        /* not before, after the failure */
 static int g_fail_on;            /* the failure message up, the last step */
 static char g_failtxt[2][48];
 
@@ -370,9 +374,6 @@ int joyride_savegame_save(char *msg, size_t n) {
 }
 
 /* ---- retrying ------------------------------------------------------------------- */
-
-int joyride_savegame_can_retry(void) { return joyride_cfg.retry && g_retry && joyride_savegame_can_save(); }
-void joyride_savegame_retry(void) { if (joyride_savegame_can_retry()) g_retry_req = 1; }
 
 /* the two texts of a failure, as the level's language has them (0x47D9A0,
  * by key: the keys' strings are in the game, 0x4B3734 "2501", 0x4B3724
@@ -592,7 +593,7 @@ void joyride_savegame_step(void) {
             if (o >= 0 && (uint32_t)o < g_nobj && g_oline[o] < 0) g_oline[o] = (int32_t)line;
         }
         if (!g_oline || !city_alloc(&g_ccity) || !city_alloc(&g_rcity)) city_free(&g_ccity), city_free(&g_rcity);
-        g_retry = g_retry_req = g_fail_on = 0;
+        g_retry = g_fail_on = 0;
         fail_texts();
         load();
         find_counters();
@@ -613,21 +614,26 @@ void joyride_savegame_step(void) {
         fprintf(stderr, "[save] processes put back\n");
         return;
     }
-    if (g_retry_req) {                                    /* Retry, from the pause menu */
-        g_retry_req = 0;
-        if (g_retry && g_rcity.objs) retry_now();
-        return;
-    }
     int fail = fail_shown();
+    if (g_retry && !fail && !g_fail_on && joyride_cfg.retry && g_rcity.objs) {   /* the failed mission, back */
+        uint32_t sig = 2166136261u;
+        for (uint32_t i = 0; i < 32; i++) sig = (sig ^ MEM16(0x6761C0 + 2 * i)) * 16777619u;
+        uint64_t now = SDL_GetTicks();
+        if (sig != g_stable_sig) g_stable_sig = sig, g_stable_t0 = now;
+        if (now - g_fail_t >= RETRY_MIN_MS && now - g_stable_t0 >= STARTUP_STILL_MS) {
+            retry_now();
+            return;
+        }
+    }
     if (fail && !g_fail_on) {                             /* "MISSION FAILED!": what the mission was, kept */
         if (joyride_cfg.retry && g_ccity.objs) {
             city_copy(&g_rcity, &g_ccity);
-            g_retry = 1;
+            g_retry = 1, g_fail_t = SDL_GetTicks(), g_stable_sig = 0;
         }
         g_started = 0;                                    /* nothing under way; the checkpoint stays */
         baseline();
         g_settle = SDL_GetTicks() + FAIL_SETTLE_MS, g_settle_base = 1;
-        fprintf(stderr, "[save] a mission failed%s\n", g_retry ? ": it can be retried (pause menu)" : "");
+        fprintf(stderr, "[save] a mission failed%s\n", g_retry ? ": it is put back once the script has tidied up" : "");
     }
     g_fail_on = fail;
     int passed = 0, changed = 0;

@@ -71,18 +71,17 @@ out of sight at the screen's real edges. Menus stay 640×480.
   with a bomb fitted, where fire is the bomb's. In a network game
   the host's choice is everyone's, for the whole game.
 * **Failed missions** — *as the game* (default: a failed job is gone) or
-  *can be retried*: after "MISSION FAILED!" (or "FRENZY FAILED!") the pause
-  menu offers *Retry the failed mission* until the next mission starts. It
-  puts the city back as it was before the mission: the phone rings again, a
-  car you get into to start a job is back where it was parked (made again
-  if it was wrecked), and the mission's own cars and people are taken away
-  so it starts afresh. Your score, weapons and place are kept. Not in
+  *can be retried*: a few seconds after "MISSION FAILED!" (or "FRENZY
+  FAILED!") the city goes back by itself to how it was before the mission,
+  so you can return to where it started and take it again: the phone
+  rings again, a car you get into to start a job is back where it was
+  parked (made again if it was wrecked), and the mission's own cars and
+  people are taken away so it starts afresh. Your score, weapons and place are kept. Not in
   network games.
 
 **Pause menu and saving (Start, or F6).** GTA never let you save; joyride
 does. In play, Start (F6 or Esc on the keyboard) pauses with *Continue*, *Save
-game* and *Quit* (and *Retry the failed mission* after a failure, with that
-setting on) (the game asks "Ya want out?": Enter or A ends the level,
+game* and *Quit* (the game asks "Ya want out?": Enter or A ends the level,
 Esc or B plays on). Esc no longer ends a level by itself. One save per
 character and level (each city's chapter), in
 `~/.local/share/joyride/saves/`: your score and its multiplier, your

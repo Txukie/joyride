@@ -257,7 +257,7 @@ QVariantList Backend::settingsModel() const {
         item("scaling", "Scaling", { opt("sharp", "Sharp"), opt("smooth", "Smooth"), opt("nearest", "Nearest"), opt("integer", "Integer") }),
         item("controller", "Controller", { opt("modern", "Modern (twin stick)"), opt("classic", "Classic (the game's own)") }),
         item("driveby", "Drive-bys", { opt("game", "As the game (London 1961's missions)"), opt("always", "Always (in a network game, the host's choice)") }),
-        item("retry", "Failed missions", { opt("0", "As the game (a failed job is lost)"), opt("1", "Can be retried from the start (pause menu)") }),
+        item("retry", "Failed missions", { opt("0", "As the game (a failed job is lost)"), opt("1", "Offered again (the phone rings, the car is back)") }),
     };
 }
 

@@ -136,7 +136,7 @@ int joyride_overlay_open(void) { return g_open; }
  * own Esc once play resumes: it asks "Ya want out?", Enter (A) ends the
  * level, Esc (B) goes on playing. Esc itself in play opens this menu: the
  * game's question comes only from Quit. */
-enum { P_CONTINUE, P_RETRY, P_SAVE, P_QUIT, P_COUNT };
+enum { P_CONTINUE, P_SAVE, P_QUIT, P_COUNT };
 static int g_pause, g_psel, g_quit, g_pconfirm;
 static int g_asking;                 /* the game's "Ya want out?" is up, from Quit */
 int joyride_quit_asking(void) { return g_asking; }
@@ -149,10 +149,10 @@ void joyride_pause_toggle(void) {
     joyride_screen_refresh();
 }
 
-/* the items the cursor stops on: Retry only after a failed mission (with
- * the option on), Save only where saving is allowed (shown greyed if not) */
+/* the items the cursor stops on: Save only where saving is allowed (shown
+ * greyed if not) */
 static int pause_item_on(int i) {
-    return i == P_RETRY ? joyride_savegame_can_retry() : i == P_SAVE ? joyride_savegame_can_save() : 1;
+    return i == P_SAVE ? joyride_savegame_can_save() : 1;
 }
 
 static int pause_key(int sc) {
@@ -168,9 +168,7 @@ static int pause_key(int sc) {
         break;
     case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER: case SDL_SCANCODE_SPACE:
         if (g_psel == P_CONTINUE) g_open = g_pause = 0;
-        else if (g_psel == P_RETRY) {
-            if (joyride_savegame_can_retry()) joyride_savegame_retry(), g_open = g_pause = 0;
-        } else if (g_psel == P_SAVE) {
+        else if (g_psel == P_SAVE) {
             int secs = joyride_savegame_mission_secs();
             if (secs >= 0 && !g_pconfirm) {                 /* a mission under way: say what is lost first */
                 g_pconfirm = 1;
@@ -315,10 +313,9 @@ static void draw_pause(SDL_Renderer *r, float vw, float vh) {
     float x = panel.x + 12, y = panel.y + 10;
     SDL_RenderDebugText(r, x, y, "Paused");
     y += 20;
-    static const char *const label[P_COUNT] = { "Continue", "Retry the failed mission", "Save game", "Quit" };
+    static const char *const label[P_COUNT] = { "Continue", "Save game", "Quit" };
     int can = joyride_savegame_can_save();
     for (int i = 0; i < P_COUNT; i++, y += 12) {
-        if (i == P_RETRY && !joyride_savegame_can_retry()) { y -= 12; continue; }   /* only after a failure */
         if (i == g_psel) {
             SDL_FRect bar = { panel.x + 4, y - 2, pw - 8, 12 };
             SDL_SetRenderDrawColor(r, 70, 60, 10, 255);
