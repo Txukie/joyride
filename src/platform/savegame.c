@@ -47,6 +47,27 @@
  * Put back, the counters and phones let the script's own loops offer the
  * next jobs (a failed one is offered again: it was not passed).
  *
+ * Retrying a failed mission (the option "retry", off by default): the
+ * checkpoint also keeps every script object (0x5F30E8, 32 bytes each: what
+ * the mission's cars and people are, phones, counters), the trigger table
+ * (0x771620, 210 of 32 bytes: +8 each one's state, DISABLE's 4) and, for
+ * each car there before the mission (CAR, type 0, +4 its car), where it
+ * stood and its model. A failure is the game's "MISSION FAILED!" or
+ * "FRENZY FAILED!" (texts 2501 and 2504; the big message, 0x481320, sets
+ * 0x785102 and copies its text to 0x77EC80): from then until the next
+ * mission starts, the pause menu offers Retry. It takes the city back to
+ * the checkpoint before the mission: what the mission made is taken away
+ * (its cars as KILL_CAR does, 0x43CE60 and 0x4773A0, unless someone is in
+ * one; its people as KILL_PED, 0x477320 and 0x41A250, and off the list of
+ * the mission's people), the objects, triggers, processes and commands are
+ * put back (the phone rings again, a car's trigger waits again), and a car
+ * from before the mission that is wrecked or was moved (a job taken by
+ * getting in) is made again where the script first put it, as PARKED_ON
+ * does (0x475840, 0x4770A0). The score and weapons are not touched.
+ * The saves keep to "passed or not started": after a failure the
+ * checkpoint stays the one before the mission (loading offers the job
+ * again); only the baseline the next mission's start is seen from moves on.
+ *
  * Not in a network game: everyone must play the same game.
  */
 #include <errno.h>
@@ -122,7 +143,33 @@ static uint32_t g_stable_sig;
 #define STARTUP_STILL_MS 2500    /* the processes running unchanged that long */
 static uint64_t g_started;       /* when a mission started (ms); 0: none since the checkpoint */
 static uint64_t g_settle;        /* until then (ms) the checkpoint follows the counters */
+static int g_settle_base;        /* ...only the baseline (after a failure) */
 #define SETTLE_MS 5000           /* a level's first lines, a pass's tidying up */
+#define FAIL_SETTLE_MS 15000     /* a failure's tidying up: the script's way back to its phones */
+/* the counters and phones a mission's start is seen from: the checkpoint's,
+ * or after a failure the city as the failure left it */
+static counter_t g_base[MAXCOUNT];
+static uint8_t g_bgone[MAXPHONE];
+
+/* ---- retrying: the city before the mission ---- */
+#define TRIGS 0x771620u          /* the trigger table */
+#define TRIGBYTES (210u * 32u)
+#define CARS 0x4BE248u           /* the cars, 0x2B0 bytes each (0x408200) */
+#define CARSIZE 0x2B0u
+#define PEDS 0x7284E0u           /* the people, 0x100 bytes each (0x44F500) */
+enum { T_CAR = 0, T_PED = 99 };
+typedef struct { int16_t ok, model; int32_t bx, by, rot; } carinfo_t;   /* where it stood: in blocks */
+typedef struct {
+    uint8_t proc[PROCBYTES], trig[TRIGBYTES];
+    uint8_t *cmds, *objs;
+    carinfo_t *cars;
+} city_t;
+static uint32_t g_nobj;          /* this level's objects */
+static int32_t *g_oline;         /* each one's script line */
+static city_t g_ccity, g_rcity;  /* at the checkpoint; the one a retry goes back to */
+static int g_retry, g_retry_req; /* a retry offered; asked for */
+static int g_fail_on;            /* the failure message up, the last step */
+static char g_failtxt[2][48];
 
 static uint32_t rec(void) { return 0x74F160u + MEM32(0x74F83C) * 0x1BCu; }
 
@@ -198,12 +245,67 @@ static void put_script(const uint8_t *proc, const uint8_t *cmds) {
     for (uint32_t i = 0; i < g_ncmd * 24u; i++) MEM8(CMDS + i) = cmds[i];
 }
 
+static void city_free(city_t *c) {
+    free(c->cmds), free(c->objs), free(c->cars);
+    c->cmds = c->objs = NULL, c->cars = NULL;
+}
+static int city_alloc(city_t *c) {
+    city_free(c);
+    c->cmds = malloc((size_t)(g_ncmd ? g_ncmd : 1) * 24u);
+    c->objs = malloc((size_t)(g_nobj ? g_nobj : 1) * 32u);
+    c->cars = calloc(g_nobj ? g_nobj : 1, sizeof *c->cars);
+    return c->cmds && c->objs && c->cars;
+}
+static void city_copy(city_t *to, const city_t *from) {
+    memcpy(to->proc, from->proc, PROCBYTES), memcpy(to->trig, from->trig, TRIGBYTES);
+    memcpy(to->cmds, from->cmds, (size_t)g_ncmd * 24u), memcpy(to->objs, from->objs, (size_t)g_nobj * 32u);
+    memcpy(to->cars, from->cars, (size_t)g_nobj * sizeof *to->cars);
+}
+
+static uint32_t car_at(int32_t id) { return CARS + (uint32_t)id * CARSIZE; }
+/* there and not wrecked (0x43E870, IS_GOAL_DEAD's: gone, or 100 damage) */
+static int car_alive(int32_t id) {
+    uint32_t c = car_at(id);
+    return (int16_t)MEM16(c + 8) != -1 && 100 - (int16_t)MEM16(c + 0xFC) > 0;
+}
+/* where a script object is (0x43E680), in its units: 64 a block */
+static void obj_where(int32_t line, int32_t *x, int32_t *y, int32_t *z, int32_t *rot) {
+    uint32_t a[5] = { (uint32_t)line, 0x676610, 0x676614, 0x676618, 0x67660C };
+    hle_call_guest(0x43E680, 5, a);
+    *x = (int32_t)MEM32(0x676610), *y = (int32_t)MEM32(0x676614), *z = (int32_t)MEM32(0x676618);
+    *rot = (int32_t)MEM32(0x67660C);
+}
+
+static void city_take(city_t *c) {
+    if (!c->objs) return;
+    take_script(c->proc, c->cmds);
+    for (uint32_t i = 0; i < TRIGBYTES; i++) c->trig[i] = MEM8(TRIGS + i);
+    for (uint32_t i = 0; i < g_nobj * 32u; i++) c->objs[i] = MEM8(OBJS + i);
+    for (uint32_t o = 0; o < g_nobj; o++) {
+        uint32_t a = OBJS + o * 32u;
+        int32_t id = (int32_t)MEM32(a + 4);
+        c->cars[o].ok = 0;
+        if ((int32_t)MEM32(a) != T_CAR || id < 0 || id >= 1024 || g_oline[o] < 0 || !car_alive(id)) continue;
+        int32_t x, y, z, rot;
+        obj_where(g_oline[o], &x, &y, &z, &rot);
+        c->cars[o] = (carinfo_t){ 1, (int16_t)MEM16(car_at(id) + 0x22), x >> 6, y >> 6, rot };
+    }
+}
+
 static void checkpoint(int settle) {
     for (int i = 0; i < g_n; i++) g_check[i].a = (int32_t)MEM32(g_obj[i] + 4), g_check[i].b = (int32_t)MEM32(g_obj[i] + 8);
     for (int i = 0; i < g_np; i++) g_pgone[i] = (uint8_t)phone_gone(i);
     if (g_ccmd) take_script(g_cproc, g_ccmd);
+    memcpy(g_base, g_check, sizeof g_base), memcpy(g_bgone, g_pgone, sizeof g_bgone);
+    if (joyride_cfg.retry) city_take(&g_ccity);
     g_started = 0;
-    if (settle) g_settle = SDL_GetTicks() + SETTLE_MS;
+    if (settle) g_settle = SDL_GetTicks() + SETTLE_MS, g_settle_base = 0;
+}
+
+/* only the baseline: the city as a failure left it */
+static void baseline(void) {
+    for (int i = 0; i < g_n; i++) g_base[i].a = (int32_t)MEM32(g_obj[i] + 4), g_base[i].b = (int32_t)MEM32(g_obj[i] + 8);
+    for (int i = 0; i < g_np; i++) g_bgone[i] = (uint8_t)phone_gone(i);
 }
 
 /* ---- saving ---------------------------------------------------------------- */
@@ -265,6 +367,130 @@ static int write_save(char *msg, size_t n, const char *what) {
 int joyride_savegame_save(char *msg, size_t n) {
     if (!joyride_savegame_can_save()) { snprintf(msg, n, "Cannot save here"); return 0; }
     return write_save(msg, n, g_started ? "saved (the mission under way not kept)" : "saved");
+}
+
+/* ---- retrying ------------------------------------------------------------------- */
+
+int joyride_savegame_can_retry(void) { return joyride_cfg.retry && g_retry && joyride_savegame_can_save(); }
+void joyride_savegame_retry(void) { if (joyride_savegame_can_retry()) g_retry_req = 1; }
+
+/* the two texts of a failure, as the level's language has them (0x47D9A0,
+ * by key: the keys' strings are in the game, 0x4B3734 "2501", 0x4B3724
+ * "2504"), letters and digits only: the message is copied as it is shown */
+static void squeeze(const char *in, char *out, size_t n) {
+    size_t j = 0;
+    for (; *in && j + 1 < n; in++)
+        if ((*in >= 'A' && *in <= 'Z') || (*in >= 'a' && *in <= 'z') || (*in >= '0' && *in <= '9')) out[j++] = *in;
+    out[j] = 0;
+}
+static void fail_texts(void) {
+    static const uint32_t key[2] = { 0x4B3734, 0x4B3724 };
+    for (int i = 0; i < 2; i++) {
+        uint32_t a = key[i];
+        uint32_t p = hle_call_guest(0x47D9A0, 1, &a);
+        char t[64] = "";
+        if (p) guest_str(p, t, sizeof t);
+        squeeze(t, g_failtxt[i], sizeof g_failtxt[i]);
+    }
+}
+/* the message is cut into its lines where it is kept (a 0 between them:
+ * "MISSION", "FAILED!"), and what follows is an older one's: read past the
+ * cuts and compare the start */
+static int fail_shown(void) {
+    if (!MEM8(0x785102)) return 0;
+    char t[44], q[48];
+    for (uint32_t i = 0; i + 1 < sizeof t; i++) t[i] = MEM8(0x77EC80 + i) ? (char)MEM8(0x77EC80 + i) : ' ';
+    t[sizeof t - 1] = 0;
+    squeeze(t, q, sizeof q);
+    for (int i = 0; i < 2; i++)
+        if (g_failtxt[i][0] && !strncmp(q, g_failtxt[i], strlen(g_failtxt[i]))) return 1;
+    return 0;
+}
+
+static int del_car(int32_t id) {
+    uint32_t a = (uint32_t)id;
+    hle_call_guest(0x43CE60, 1, &a);                      /* off the mission's cars */
+    a = (uint32_t)id;
+    return (uint8_t)hle_call_guest(0x4773A0, 1, &a);      /* 0: someone in it, left */
+}
+static void del_ped(int32_t id) {
+    int32_t st = (int32_t)MEM32(PEDS + (uint32_t)id * 0x100u + 0x70);
+    if (st == 0xC || st == 0x17) return;                  /* dead: the body stays */
+    uint32_t a = (uint32_t)id;
+    hle_call_guest(0x477320, 1, &a);
+    a = (uint32_t)id;
+    hle_call_guest(0x41A250, 1, &a);
+    int32_t n = (int32_t)MEM32(0x6B3B80);                 /* off the mission's people, as KILL_PED */
+    for (int32_t i = 0; i < n && i < 160; i++)
+        if ((int32_t)MEM32(0x676390u + 4u * (uint32_t)i) == id) {
+            for (int32_t k = i; k + 1 < n; k++) MEM32(0x676390u + 4u * (uint32_t)k) = MEM32(0x676394u + 4u * (uint32_t)k);
+            MEM32(0x676390u + 4u * (uint32_t)(n - 1)) = 0xFFFFFFFFu;
+            MEM32(0x6B3B80) = (uint32_t)(n - 1);
+            break;
+        }
+}
+/* a car where the script first put it, as PARKED_ON does */
+static int32_t make_car(int32_t line, const carinfo_t *ci, int32_t bz) {
+    int32_t x = ci->bx * 64, y = ci->by * 64, z = bz * 64;
+    uint32_t a[6] = { (uint32_t)ci->bx, (uint32_t)ci->by, (uint32_t)bz, (uint32_t)(int32_t)ci->model, (uint32_t)ci->rot, 0 };
+    int32_t id = (int16_t)hle_call_guest(0x475840, 6, a);
+    if (id < 0) return -1;
+    uint32_t b[6] = { (uint32_t)(x + 32), (uint32_t)(y + 32), (uint32_t)z, (uint32_t)id, (uint32_t)(int32_t)ci->model, (uint32_t)ci->rot };
+    hle_call_guest(0x4770A0, 6, b);
+    MEM16(car_at(id) + 0x134) = (uint16_t)line;
+    MEM8(car_at(id) + 0x139) = 0;
+    return id;
+}
+
+static void retry_now(void) {
+    city_t *r = &g_rcity;
+    int cars = 0, peds = 0, made = 0;
+    static int32_t gone[1024];
+    int ngone = 0;
+    /* what the mission made: away */
+    for (uint32_t o = 0; o < g_nobj; o++) {
+        uint32_t a = OBJS + o * 32u;
+        int32_t t = (int32_t)MEM32(a), id = (int32_t)MEM32(a + 4);
+        int32_t ot, oid;                                  /* the object before the mission */
+        memcpy(&ot, r->objs + o * 32u, 4), memcpy(&oid, r->objs + o * 32u + 4, 4);
+        if (id < 0 || (t == ot && id == oid)) continue;
+        int seen = 0;
+        for (int k = 0; k < ngone; k++) seen |= gone[k] == (t << 16 | id);
+        if (seen) continue;
+        if (t == T_CAR && id < 1024) { if (del_car(id)) cars++; }
+        else if (t == T_PED && id < 512) del_ped(id), peds++;
+        else continue;
+        if (ngone < 1024) gone[ngone++] = t << 16 | id;
+    }
+    /* the cars from before: wrecked or moved, made again */
+    static uint8_t again[MAXOBJ];
+    memset(again, 0, sizeof again);
+    for (uint32_t o = 0; o < g_nobj; o++) {
+        const carinfo_t *ci = &r->cars[o];
+        if (!ci->ok) continue;
+        int32_t oid;
+        memcpy(&oid, r->objs + o * 32u + 4, 4);
+        int32_t x, y, z, rot;
+        int alive = car_alive(oid);
+        if (alive) obj_where(g_oline[o], &x, &y, &z, &rot);
+        if (alive && x >> 6 == ci->bx && y >> 6 == ci->by) continue;   /* where it was */
+        if (del_car(oid) || !alive) again[o] = 1;                       /* not with someone in it */
+    }
+    /* the script as it was */
+    for (uint32_t i = 0; i < g_nobj * 32u; i++) MEM8(OBJS + i) = r->objs[i];
+    for (uint32_t i = 0; i < TRIGBYTES; i++) MEM8(TRIGS + i) = r->trig[i];
+    put_script(r->proc, r->cmds);
+    for (uint32_t o = 0; o < g_nobj; o++) {
+        if (!again[o]) continue;
+        uint32_t a = OBJS + o * 32u;
+        int32_t id = make_car(g_oline[o], &r->cars[o], (int32_t)MEM32(a + 0x18));
+        MEM32(a + 4) = (uint32_t)id;
+        if (id >= 0) made++;
+    }
+    g_retry = 0;
+    checkpoint(1);
+    fprintf(stderr, "[save] retry: the city before the mission (%d cars and %d people of the mission taken away, %d cars made again)\n",
+            cars, peds, made);
 }
 
 /* ---- loading ----------------------------------------------------------------- */
@@ -353,6 +579,21 @@ void joyride_savegame_step(void) {
         free(g_pend_proc), free(g_pend_cmd);
         g_pend_proc = g_pend_cmd = NULL;
         g_level_t0 = g_stable_t0 = SDL_GetTicks(), g_stable_sig = 0;
+        g_nobj = 0;
+        for (uint32_t line = 0; line < NLINES; line++) {
+            int32_t o = (int16_t)MEM16(LINES + 2 * line);
+            if (o >= 0 && (uint32_t)o < MAXOBJ && (uint32_t)o + 1 > g_nobj) g_nobj = (uint32_t)o + 1;
+        }
+        free(g_oline);
+        g_oline = malloc((size_t)(g_nobj ? g_nobj : 1) * sizeof *g_oline);
+        for (uint32_t o = 0; g_oline && o < g_nobj; o++) g_oline[o] = -1;
+        for (uint32_t line = 0; g_oline && line < NLINES; line++) {
+            int32_t o = (int16_t)MEM16(LINES + 2 * line);
+            if (o >= 0 && (uint32_t)o < g_nobj && g_oline[o] < 0) g_oline[o] = (int32_t)line;
+        }
+        if (!g_oline || !city_alloc(&g_ccity) || !city_alloc(&g_rcity)) city_free(&g_ccity), city_free(&g_rcity);
+        g_retry = g_retry_req = g_fail_on = 0;
+        fail_texts();
         load();
         find_counters();
         checkpoint(1);
@@ -372,26 +613,47 @@ void joyride_savegame_step(void) {
         fprintf(stderr, "[save] processes put back\n");
         return;
     }
+    if (g_retry_req) {                                    /* Retry, from the pause menu */
+        g_retry_req = 0;
+        if (g_retry && g_rcity.objs) retry_now();
+        return;
+    }
+    int fail = fail_shown();
+    if (fail && !g_fail_on) {                             /* "MISSION FAILED!": what the mission was, kept */
+        if (joyride_cfg.retry && g_ccity.objs) {
+            city_copy(&g_rcity, &g_ccity);
+            g_retry = 1;
+        }
+        g_started = 0;                                    /* nothing under way; the checkpoint stays */
+        baseline();
+        g_settle = SDL_GetTicks() + FAIL_SETTLE_MS, g_settle_base = 1;
+        fprintf(stderr, "[save] a mission failed%s\n", g_retry ? ": it can be retried (pause menu)" : "");
+    }
+    g_fail_on = fail;
     int passed = 0, changed = 0;
     for (int i = 0; i < g_n; i++) {
         int32_t a = (int32_t)MEM32(g_obj[i] + 4), b = (int32_t)MEM32(g_obj[i] + 8), t = (int32_t)MEM32(g_obj[i]);
-        if (a != g_check[i].a || b != g_check[i].b) changed = 1;
-        if ((t == T_MISSIONS || t == T_SECRETS) && a < g_check[i].a) passed = 1;
+        if (a != g_base[i].a || b != g_base[i].b) changed = 1;
+        if ((t == T_MISSIONS || t == T_SECRETS) && a < g_base[i].a) passed = 1;
     }
     for (int i = 0; i < g_np; i++)
-        if (phone_gone(i) != g_pgone[i]) changed = 1;     /* a job's phone taken out: a mission starting */
+        if (phone_gone(i) != g_bgone[i]) changed = 1;     /* a job's phone taken out: a mission starting */
     if (g_settle && !g_started && SDL_GetTicks() >= g_settle) {   /* settled: the checkpoint as it is now */
-        checkpoint(0);
+        if (g_settle_base) baseline();
+        else checkpoint(0);
         g_settle = 0;
         return;
     }
     if (passed) {                                         /* a mission passed: the new checkpoint */
         checkpoint(1);
+        g_retry = 0;
         fprintf(stderr, "[save] a mission passed: checkpoint\n");
     } else if (changed && !g_started && SDL_GetTicks() < g_settle) {
-        checkpoint(0);                                    /* the script settling: still the checkpoint */
+        if (g_settle_base) baseline();                    /* the failure's tidying up */
+        else checkpoint(0);                               /* the script settling: still the checkpoint */
     } else if (changed && !g_started) {                   /* a mission starts: saved as it was */
         g_started = SDL_GetTicks() ? SDL_GetTicks() : 1;
+        g_retry = 0;
         char msg[64];
         write_save(msg, sizeof msg, "autosaved (a mission starts)");
     }

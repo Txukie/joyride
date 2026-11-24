@@ -223,7 +223,7 @@ void Backend::play(const QString &id) {
 QMap<QString, QString> Backend::readCfg() const {
     QMap<QString, QString> m{ { "resolution", "game" }, { "filter", "1" }, { "scaling", "sharp" }, { "fullscreen", "0" },
                               { "smooth", "1" }, { "renderer", "software" }, { "controller", "modern" }, { "hud", "auto" },
-                              { "driveby", "game" } };
+                              { "driveby", "game" }, { "retry", "0" } };
     QFile f(cfgPath());
     if (f.open(QIODevice::ReadOnly | QIODevice::Text))
         for (const QString &line : QString::fromUtf8(f.readAll()).split('\n')) {
@@ -257,6 +257,7 @@ QVariantList Backend::settingsModel() const {
         item("scaling", "Scaling", { opt("sharp", "Sharp"), opt("smooth", "Smooth"), opt("nearest", "Nearest"), opt("integer", "Integer") }),
         item("controller", "Controller", { opt("modern", "Modern (twin stick)"), opt("classic", "Classic (the game's own)") }),
         item("driveby", "Drive-bys", { opt("game", "As the game (London 1961's missions)"), opt("always", "Always (in a network game, the host's choice)") }),
+        item("retry", "Failed missions", { opt("0", "As the game (a failed job is lost)"), opt("1", "Can be retried from the start (pause menu)") }),
     };
 }
 
@@ -267,7 +268,7 @@ void Backend::setSetting(const QString &key, const QString &value) {
     QFile f(cfgPath());
     if (!f.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) { error_ = "cannot write " + cfgPath(); emit busyChanged(); return; }
     QString out = "# joyride settings (the F1 overlay writes this)\n";
-    for (const char *k : { "resolution", "filter", "scaling", "fullscreen", "smooth", "renderer", "controller", "hud", "driveby" })
+    for (const char *k : { "resolution", "filter", "scaling", "fullscreen", "smooth", "renderer", "controller", "hud", "driveby", "retry" })
         out += QString(k) + "=" + cfg[k] + "\n";
     f.write(out.toUtf8());
 }

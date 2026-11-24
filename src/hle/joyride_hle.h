@@ -82,6 +82,8 @@ void joyride_savegame_step(void);               /* each game step in play (pad.c
 int  joyride_savegame_can_save(void);           /* in play, a level of one's own (not a network game) */
 int  joyride_savegame_save(char *msg, size_t n);/* 1 saved; msg says what happened */
 int  joyride_savegame_mission_secs(void);      /* since the mission under way started, -1 none */
+int  joyride_savegame_can_retry(void);          /* a failed mission can be started again */
+void joyride_savegame_retry(void);              /* ...on the next step of play */
 /* the pause menu (overlay.c) */
 void joyride_pause_toggle(void);
 int  joyride_quit_asking(void);                 /* the game's "Ya want out?" is up, from the menu's Quit */
@@ -119,6 +121,7 @@ typedef struct {
     int controls_modern;    /* the controller scheme (pad.c) */
     int hud;                /* HUD size with the GPU renderer: 0 auto, else that many times */
     int driveby;            /* drive-bys: 0 as the game (London 1961's missions), 1 always */
+    int retry;              /* a failed mission can be started again from its beginning (savegame.c) */
 } joyride_settings;
 extern joyride_settings joyride_cfg;
 void joyride_config_load(const char *path);   /* then the JOYRIDE_* overrides */

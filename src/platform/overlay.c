@@ -28,7 +28,7 @@
 #include "win32hle.h"
 #include "joyride_hle.h"
 
-joyride_settings joyride_cfg = { 0, 0, 1, 0, 0, 1, 0, 1, 0, 0 };
+joyride_settings joyride_cfg = { 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0 };
 static char g_path[4096];
 
 /* ---- settings file ------------------------------------------------------- */
@@ -53,6 +53,7 @@ void joyride_config_load(const char *path) {
         else if (!strcmp(key, "controller")) joyride_cfg.controls_modern = strcmp(val, "classic") != 0;
         else if (!strcmp(key, "hud")) joyride_cfg.hud = !strcmp(val, "auto") ? 0 : atoi(val) < 1 ? 1 : atoi(val) > 4 ? 4 : atoi(val);
         else if (!strcmp(key, "driveby")) joyride_cfg.driveby = !strcmp(val, "always");
+        else if (!strcmp(key, "retry")) joyride_cfg.retry = atoi(val) != 0;
     }
     if (f) fclose(f);
 
@@ -72,6 +73,7 @@ void joyride_config_load(const char *path) {
     if ((e = getenv("JOYRIDE_SMOOTH")) && *e) joyride_cfg.smooth = *e != '0';
     if ((e = getenv("JOYRIDE_RENDERER")) && *e) joyride_cfg.hwrender = !strcmp(e, "gpu");
     if ((e = getenv("JOYRIDE_DRIVEBY")) && *e) joyride_cfg.driveby = !strcmp(e, "always");
+    if ((e = getenv("JOYRIDE_RETRY")) && *e) joyride_cfg.retry = *e != '0';
     if ((e = getenv("JOYRIDE_HUD")) && *e) joyride_cfg.hud = !strcmp(e, "auto") ? 0 : atoi(e) < 1 ? 1 : atoi(e) > 4 ? 4 : atoi(e);
     if ((e = getenv("JOYRIDE_CONTROLLER")) && *e) joyride_cfg.controls_modern = strcmp(e, "classic") != 0;
     if ((e = getenv("JOYRIDE_SCALE")) && *e)
@@ -97,13 +99,14 @@ void joyride_config_save(void) {
     if (joyride_cfg.hud) fprintf(f, "hud=%d\n", joyride_cfg.hud);
     else fprintf(f, "hud=auto\n");
     fprintf(f, "driveby=%s\n", joyride_cfg.driveby ? "always" : "game");
+    fprintf(f, "retry=%d\n", joyride_cfg.retry);
     fclose(f);
     rename(tmp, g_path);
 }
 
 /* ---- the menu ------------------------------------------------------------ */
 
-enum { ITEM_RES, ITEM_RENDERER, ITEM_HUD, ITEM_FILTER, ITEM_SMOOTH, ITEM_CONTROLS, ITEM_DRIVEBY, ITEM_SCALING, ITEM_FULLSCREEN, ITEM_RESUME, ITEM_COUNT };
+enum { ITEM_RES, ITEM_RENDERER, ITEM_HUD, ITEM_FILTER, ITEM_SMOOTH, ITEM_CONTROLS, ITEM_DRIVEBY, ITEM_RETRY, ITEM_SCALING, ITEM_FULLSCREEN, ITEM_RESUME, ITEM_COUNT };
 
 static int g_open, g_sel;
 static int g_sizes[HLE_DD_MAX_MODES + 1][2], g_nsizes;   /* [0] = the game's own */
@@ -133,7 +136,7 @@ int joyride_overlay_open(void) { return g_open; }
  * own Esc once play resumes: it asks "Ya want out?", Enter (A) ends the
  * level, Esc (B) goes on playing. Esc itself in play opens this menu: the
  * game's question comes only from Quit. */
-enum { P_CONTINUE, P_SAVE, P_QUIT, P_COUNT };
+enum { P_CONTINUE, P_RETRY, P_SAVE, P_QUIT, P_COUNT };
 static int g_pause, g_psel, g_quit, g_pconfirm;
 static int g_asking;                 /* the game's "Ya want out?" is up, from Quit */
 int joyride_quit_asking(void) { return g_asking; }
@@ -146,20 +149,28 @@ void joyride_pause_toggle(void) {
     joyride_screen_refresh();
 }
 
+/* the items the cursor stops on: Retry only after a failed mission (with
+ * the option on), Save only where saving is allowed (shown greyed if not) */
+static int pause_item_on(int i) {
+    return i == P_RETRY ? joyride_savegame_can_retry() : i == P_SAVE ? joyride_savegame_can_save() : 1;
+}
+
 static int pause_key(int sc) {
     switch (sc) {
     case SDL_SCANCODE_ESCAPE: case SDL_SCANCODE_F6: g_open = g_pause = 0; break;
     case SDL_SCANCODE_UP:
         g_pconfirm = 0, g_pmsg[0] = 0;
-        do g_psel = (g_psel + P_COUNT - 1) % P_COUNT; while (g_psel == P_SAVE && !joyride_savegame_can_save());
+        do g_psel = (g_psel + P_COUNT - 1) % P_COUNT; while (!pause_item_on(g_psel));
         break;
     case SDL_SCANCODE_DOWN:
         g_pconfirm = 0, g_pmsg[0] = 0;
-        do g_psel = (g_psel + 1) % P_COUNT; while (g_psel == P_SAVE && !joyride_savegame_can_save());
+        do g_psel = (g_psel + 1) % P_COUNT; while (!pause_item_on(g_psel));
         break;
     case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER: case SDL_SCANCODE_SPACE:
         if (g_psel == P_CONTINUE) g_open = g_pause = 0;
-        else if (g_psel == P_SAVE) {
+        else if (g_psel == P_RETRY) {
+            if (joyride_savegame_can_retry()) joyride_savegame_retry(), g_open = g_pause = 0;
+        } else if (g_psel == P_SAVE) {
             int secs = joyride_savegame_mission_secs();
             if (secs >= 0 && !g_pconfirm) {                 /* a mission under way: say what is lost first */
                 g_pconfirm = 1;
@@ -210,6 +221,10 @@ static void change(int dir) {
         break;
     case ITEM_DRIVEBY:
         joyride_cfg.driveby = !joyride_cfg.driveby;
+        joyride_config_save();
+        break;
+    case ITEM_RETRY:
+        joyride_cfg.retry = !joyride_cfg.retry;
         joyride_config_save();
         break;
     case ITEM_CONTROLS:
@@ -300,9 +315,10 @@ static void draw_pause(SDL_Renderer *r, float vw, float vh) {
     float x = panel.x + 12, y = panel.y + 10;
     SDL_RenderDebugText(r, x, y, "Paused");
     y += 20;
-    static const char *const label[P_COUNT] = { "Continue", "Save game", "Quit" };
+    static const char *const label[P_COUNT] = { "Continue", "Retry the failed mission", "Save game", "Quit" };
     int can = joyride_savegame_can_save();
     for (int i = 0; i < P_COUNT; i++, y += 12) {
+        if (i == P_RETRY && !joyride_savegame_can_retry()) { y -= 12; continue; }   /* only after a failure */
         if (i == g_psel) {
             SDL_FRect bar = { panel.x + 4, y - 2, pw - 8, 12 };
             SDL_SetRenderDrawColor(r, 70, 60, 10, 255);
@@ -390,6 +406,10 @@ void joyride_overlay_draw(uint32_t *bgra, int w, int h) {
             if (joyride_net_driveby() >= 0)                  /* a network game: the host's */
                 snprintf(val, sizeof val, "%s (host's rule)", joyride_net_driveby() ? "always" : "as the game");
             else snprintf(val, sizeof val, "%s", joyride_cfg.driveby ? "always" : "as the game (London 1961)");
+            break;
+        case ITEM_RETRY:
+            snprintf(label, sizeof label, "Failed missions");
+            snprintf(val, sizeof val, "%s", joyride_cfg.retry ? "can be retried" : "as the game (lost)");
             break;
         case ITEM_SCALING:
             snprintf(label, sizeof label, "Scaling");

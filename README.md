@@ -70,10 +70,19 @@ out of sight at the screen's real edges. Menus stay 640×480.
   your weapon out of its side (see the Launcher section), except in a car
   with a bomb fitted, where fire is the bomb's. In a network game
   the host's choice is everyone's, for the whole game.
+* **Failed missions** — *as the game* (default: a failed job is gone) or
+  *can be retried*: after "MISSION FAILED!" (or "FRENZY FAILED!") the pause
+  menu offers *Retry the failed mission* until the next mission starts. It
+  puts the city back as it was before the mission: the phone rings again, a
+  car you get into to start a job is back where it was parked (made again
+  if it was wrecked), and the mission's own cars and people are taken away
+  so it starts afresh. Your score, weapons and place are kept. Not in
+  network games.
 
 **Pause menu and saving (Start, or F6).** GTA never let you save; joyride
 does. In play, Start (F6 or Esc on the keyboard) pauses with *Continue*, *Save
-game* and *Quit* (the game asks "Ya want out?": Enter or A ends the level,
+game* and *Quit* (and *Retry the failed mission* after a failure, with that
+setting on) (the game asks "Ya want out?": Enter or A ends the level,
 Esc or B plays on). Esc no longer ends a level by itself. One save per
 character and level (each city's chapter), in
 `~/.local/share/joyride/saves/`: your score and its multiplier, your
@@ -96,7 +105,7 @@ With the software renderer, up to 2560×1440 keeps the game's full speed
 with filtering, but with few frames between steps; the GPU renderer keeps
 the display's rate there.
 `JOYRIDE_RES=<w>x<h>|desktop|game`, `JOYRIDE_RENDERER=software|gpu`, `JOYRIDE_CONTROLLER=modern|classic`,
-`JOYRIDE_FILTER=0|1`, `JOYRIDE_SMOOTH=0|1`, `JOYRIDE_HUD=auto|1-4`, `JOYRIDE_DRIVEBY=game|always` and `JOYRIDE_SCALE=<mode>` override
+`JOYRIDE_FILTER=0|1`, `JOYRIDE_SMOOTH=0|1`, `JOYRIDE_HUD=auto|1-4`, `JOYRIDE_DRIVEBY=game|always`, `JOYRIDE_RETRY=0|1` and `JOYRIDE_SCALE=<mode>` override
 the file for one run.
 
 Not yet: Windows and macOS builds.
@@ -212,7 +221,7 @@ the next model the city has (all but the tank). See
 
 | Key | |
 | --- | --- |
-| F1 | settings: screen size, renderer, HUD size, textures, motion, controller, drive-bys, scaling, fullscreen |
+| F1 | settings: screen size, renderer, HUD size, textures, motion, controller, drive-bys, failed missions, scaling, fullscreen |
 | M | city map |
 | + / - | zoom the game in / out |
 | F6 | the pause menu: continue, save, quit |
