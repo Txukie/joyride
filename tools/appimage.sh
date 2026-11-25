@@ -117,7 +117,15 @@ for l in libSDL3.so libSDL3_ttf.so libavformat.so libavcodec.so libavutil.so; do
     libs+=(-l "/usr/lib/$soname")
 done
 cd "$work"
-NO_STRIP=1 PATCHELF="$(command -v patchelf)" QML_SOURCES_PATHS="$root/launcher/qml" QMAKE="$(command -v qmake6)" LINUXDEPLOY_OUTPUT_VERSION="$version" ARCH=x86_64 \
+# Wayland's own plugins beside the platform one (xdg-shell, decorations, its GL)
+qtplugins="$(qmake6 -query QT_INSTALL_PLUGINS)"
+mkdir -p "$A/usr/plugins"
+for d in wayland-shell-integration wayland-decoration-client wayland-graphics-integration-client; do
+    cp -a "$qtplugins/$d" "$A/usr/plugins/"
+    libs+=(--deploy-deps-only "$A/usr/plugins/$d")
+done
+EXTRA_PLATFORM_PLUGINS="libqwayland.so;libqoffscreen.so" \
+    NO_STRIP=1 PATCHELF="$(command -v patchelf)" QML_SOURCES_PATHS="$root/launcher/qml" QMAKE="$(command -v qmake6)" LINUXDEPLOY_OUTPUT_VERSION="$version" ARCH=x86_64 \
     linuxdeploy --appdir "$A" --plugin qt --output appimage \
         -e "$A/usr/bin/joyride-launcher" -e "$A/usr/bin/joyride-setup" "${libs[@]}" \
         --deploy-deps-only "$P" --deploy-deps-only "$C" \

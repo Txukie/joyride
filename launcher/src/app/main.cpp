@@ -50,6 +50,13 @@ static void install_desktop_entry() {
 }
 
 int main(int argc, char **argv) {
+    // from an AppImage: Qt's plugins and QML modules are the ones it carries
+    // (its qt.conf is not always found, by where Qt takes the program to be)
+    QByteArray appdir = qgetenv("APPDIR");
+    if (!appdir.isEmpty()) {
+        if (qEnvironmentVariableIsEmpty("QT_PLUGIN_PATH")) qputenv("QT_PLUGIN_PATH", appdir + "/usr/plugins");
+        if (qEnvironmentVariableIsEmpty("QML_IMPORT_PATH")) qputenv("QML_IMPORT_PATH", appdir + "/usr/qml");
+    }
     if (qEnvironmentVariableIsEmpty("JOYRIDE_LAUNCHER_SHOT")) install_desktop_entry();
     QGuiApplication app(argc, argv);
     app.setApplicationName("joyride");
