@@ -49,6 +49,8 @@ def main(argv):
     cc = cc or shutil.which('gcc')
     if not cc:
         sys.exit('no C compiler')
+    if os.sep in cc or '/' in cc:
+        cc = os.path.abspath(cc)                         # Windows starts a program by a full path only
 
     gen = os.path.join(ROOT, 'gen', 'wino', 'recomp')
     srcs = sorted(os.path.join(gen, f) for f in os.listdir(gen) if f.endswith('.c')) if os.path.isdir(gen) else []

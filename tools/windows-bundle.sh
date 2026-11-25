@@ -46,16 +46,45 @@ echo "== GCC for Windows (C only)"
 unzip -q -o "$(one "$deps/winlibs-*.zip")" -d "$work/winlibs"
 cp -a "$work/winlibs/mingw64" "$R/cc"
 rm -rf "$work/winlibs"
-# what the game's build does not use: other languages, the debugger, the
-# build tools and their documentation
-( cd "$R/cc" && rm -rf share/doc share/info share/man share/gdb share/locale lib/python* opt \
-    bin/gdb* bin/lldb* bin/cmake* bin/ninja* bin/mingw32-make* bin/ccache* bin/yasm* bin/nasm* bin/*gfortran* \
-    bin/*gnat* bin/*gdc* bin/*gccgo* bin/*g++* bin/*c++* bin/clang* bin/llvm* bin/lld* bin/doxygen* bin/cppcheck* \
-    bin/*windres* bin/*objc* include/c++ x86_64-w64-mingw32/include/c++ )
-find "$R/cc" \( -name 'cc1plus.exe' -o -name 'f951.exe' -o -name 'gnat1.exe' -o -name 'cc1obj*.exe' -o -name 'd21.exe' \
-     -o -name 'go1.exe' -o -name 'lto1.exe' -o -name 'libstdc++*' -o -name 'libgfortran*' -o -name 'libgo*' \
-     -o -name 'libgphobos*' -o -name 'libgdruntime*' -o -name 'libobjc*' -o -name 'adainclude' -o -name 'adalib' \) \
-     -prune -exec rm -rf {} + 2>/dev/null || true
+# only what compiling C and linking it with the runtime uses (WinLibs is
+# a whole toolchain: half a gigabyte of other languages, tools and SDKs)
+( cd "$R/cc"
+  keep_exe="gcc.exe as.exe ld.exe ld.bfd.exe ar.exe"
+  # the DLLs those load, and GCC's own parts load, followed through
+  need=""
+  todo="$(for e in $keep_exe; do echo bin/$e; done) $(ls libexec/gcc/*/*/*.exe)"
+  while [ -n "$todo" ]; do
+      next=""
+      for f in $todo; do
+          for d in $(x86_64-w64-mingw32-objdump -p "$f" 2>/dev/null | awk '/DLL Name/{print $3}'); do
+              [ -f "bin/$d" ] && case " $need " in *" $d "*) ;; *) need="$need $d"; next="$next bin/$d";; esac
+          done
+      done
+      todo="$next"
+  done
+  for f in bin/*; do
+      n="$(basename "$f")"
+      case " $keep_exe $need " in *" $n "*) ;; *) rm -rf "$f";; esac
+  done
+  rm -rf share opt etc doc lib/python* libexec/gcc/*/*/lto1.exe libexec/gcc/*/*/cc1plus.exe libexec/gcc/*/*/f951.exe \
+         libexec/gcc/*/*/gnat1.exe libexec/gcc/*/*/cc1obj*.exe libexec/gcc/*/*/d21.exe libexec/gcc/*/*/go1.exe
+  for f in lib/*; do [ "$(basename "$f")" = gcc ] || rm -rf "$f"; done
+  T=x86_64-w64-mingw32
+  for f in $T/bin/*; do case "$(basename "$f")" in as.exe|ld.exe|ld.bfd.exe|ar.exe) ;; *) rm -rf "$f";; esac; done
+  # the libraries: the C runtime's, GCC's and those a link names
+  for f in $T/lib/lib*; do
+      case "$(basename "$f")" in
+          libmingw32.a|libmingwex.a|libmingwthrd.a|libmoldname.a|libmsvcrt*.a|libucrt*.a|libapi-ms-win-crt*|libvcruntime*.a| \
+          libkernel32.a|libuser32.a|libgdi32.a|libshell32.a|libole32.a|liboleaut32.a|libuuid.a|libadvapi32.a| \
+          libws2_32.a|libwinmm.a|libm.a|libpthread*|libwinpthread*|libntdll.a|libkernelbase.a|libcomdlg32.a| \
+          libwinspool.a|libssp*|libquadmath*|libbcrypt.a|libsetupapi.a|libimm32.a|libversion.a|libdxguid.a) ;;
+          *) rm -rf "$f";;
+      esac
+  done
+  rm -rf $T/include/ddk $T/include/GL $T/include/gdiplus $T/include/wrl $T/include/winrt $T/include/psdk_inc/intrin-impl.h.unused \
+         $T/include/*.idl $T/include/mshtml* $T/include/d3d* $T/include/d2d* $T/include/dxgi* $T/include/dwrite* \
+         $T/include/windows.*.h $T/include/c++ $T/include/*.tlb
+  rm -rf include/c++ )
 
 # how tools/link_game.py links the game here: the flags the game's own
 # build has on Windows (CMakeLists.txt), its libraries in order, its DLLs

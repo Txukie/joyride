@@ -66,6 +66,8 @@ def main(argv):
         del args[i:i + 2]
     if len(args) != 1:
         sys.exit(__doc__)
+    if cc and (os.sep in cc or '/' in cc):
+        cc = os.path.abspath(cc)                         # Windows starts a program by a full path only
     exe = os.path.abspath(args[0])
     if not os.path.isfile(exe):
         sys.exit(f'no {exe}')
