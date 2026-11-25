@@ -536,12 +536,23 @@ static void retry_now(void) {
         int alive = car_alive(oid);
         if (alive) obj_where(g_oline[o], &x, &y, &z, &rot);
         if (alive && x >> 6 == ci->bx && y >> 6 == ci->by) continue;   /* where it was */
-        if (del_car(oid) || !alive) again[o] = 1;                       /* not with someone in it */
+        if (!alive || del_car(oid)) again[o] = 1;   /* a wreck is left to the game; not one with someone in it */
     }
     /* the script as it was */
     for (uint32_t i = 0; i < g_nobj * 32u; i++) MEM8(OBJS + i) = r->objs[i];
     for (uint32_t i = 0; i < TRIGBYTES; i++) MEM8(TRIGS + i) = r->trig[i];
     put_script(r->proc, r->cmds);
+    /* not in the old one's place in the cars: what burns there (a wreck's
+     * fire) is the place's, and would burn on the new car. Its +0x139 set
+     * keeps the game's search for a free one (0x407AB0) off it */
+    static int32_t held[MAXOBJ];
+    int nheld = 0;
+    for (uint32_t o = 0; o < g_nobj; o++) {
+        int32_t oid;
+        memcpy(&oid, r->objs + o * 32u + 4, 4);
+        if (again[o] && oid >= 0 && oid < 1024 && !MEM8(car_at(oid) + 0x139))
+            MEM8(car_at(oid) + 0x139) = 1, held[nheld++] = oid;
+    }
     for (uint32_t o = 0; o < g_nobj; o++) {
         if (!again[o]) continue;
         uint32_t a = OBJS + o * 32u;
@@ -549,6 +560,7 @@ static void retry_now(void) {
         MEM32(a + 4) = (uint32_t)id;
         if (id >= 0) made++;
     }
+    for (int k = 0; k < nheld; k++) MEM8(car_at(held[k]) + 0x139) = 0;
     g_retry = 0;
     checkpoint(1);
     fprintf(stderr, "[save] retry: the city before the mission (%d cars and %d people of the mission taken away, %d cars made again)\n",
