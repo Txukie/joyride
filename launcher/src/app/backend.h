@@ -4,6 +4,7 @@
 #pragma once
 #include <QObject>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QStringList>
 #include <QVariant>
 
@@ -73,6 +74,9 @@ private:
     QString sourceDir() const;                                      // joyride's source (build/, tools/)
     QString bundledSource() const;                                  // the AppImage's, or empty
     bool syncSource();                                              // copied out of the AppImage
+    QString appUsr() const;                                         // the AppImage's usr/, or empty
+    QProcessEnvironment toolEnv() const;                            // its libraries, Python and compiler
+    QString python() const;                                         // the tools' Python
     QString joyrideBinary() const;
     QString cfgPath() const;
     QMap<QString, QString> readCfg() const;

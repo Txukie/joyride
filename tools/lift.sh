@@ -10,7 +10,8 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 exe="$(realpath "${1:-$root/game_data/WINO/Grand Theft Auto.exe}")"
-py="$root/.venv/bin/python"
+py="${JOYRIDE_PYTHON:-$root/.venv/bin/python}"     # the AppImage's own Python, else the checkout's .venv
+cc="${CC:-gcc}"
 out="$root/gen/wino"
 pcr="$root/external/pcrecomp"
 
@@ -22,15 +23,15 @@ got=$(sha1sum "$exe" | cut -d' ' -f1)
 [ "$got" = "$want" ] || echo "warning: $exe is not the 2002 release (sha1 $got)"
 
 mkdir -p "$out"
-python3 "$root/tools/unpack.py" "$exe" "$out/mine" > "$out/unpack.txt"
+"$py" "$root/tools/unpack.py" "$exe" "$out/mine" > "$out/unpack.txt"
 "$py" "$root/tools/funcs.py" "$out/mine" > "$out/funcs.txt"
 (cd "$pcr" && "$py" -m tools "$exe" --all -o "$out/recomp") > "$out/lift.log" 2>&1
 tail -4 "$out/lift.log"
-python3 "$root/tools/postlift.py" "$out/recomp"
+"$py" "$root/tools/postlift.py" "$out/recomp"
 
 # every generated file must at least parse, as the build compiles it: the
 # runtime headers, and joyride's own (the splices postlift.py adds use it)
 ls "$out"/recomp/*.c | xargs -P "$(nproc)" -I{} sh -c \
-  'LC_ALL=C gcc -w -fsyntax-only -DRECOMP_MEM_BASE=0x100000000000ull -I "$0/runtime/recomp32" -I "$2/src/hle" -include "$1/recomp/recomp_funcs.h" -include "$2/src/hle/texfilter_inline.h" "{}"' \
-  "$pcr" "$out" "$root"
+  'LC_ALL=C $3 -w -fsyntax-only -DRECOMP_MEM_BASE=0x100000000000ull -I "$0/runtime/recomp32" -I "$2/src/hle" -include "$1/recomp/recomp_funcs.h" -include "$2/src/hle/texfilter_inline.h" "{}"' \
+  "$pcr" "$out" "$root" "$cc"
 echo "all generated files parse"

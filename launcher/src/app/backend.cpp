@@ -63,6 +63,28 @@ bool Backend::syncSource() {
     return true;
 }
 
+// what the steps and the game run with: from an AppImage, its libraries,
+// and its Python and compiler for the tools
+QString Backend::appUsr() const {
+    QString b = bundledSource();
+    return b.isEmpty() ? QString() : qEnvironmentVariable("APPDIR") + "/usr";
+}
+QProcessEnvironment Backend::toolEnv() const {
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    QString usr = appUsr();
+    if (usr.isEmpty()) return env;
+    QString ld = env.value("LD_LIBRARY_PATH");
+    env.insert("LD_LIBRARY_PATH", usr + "/lib" + (ld.isEmpty() ? "" : ":" + ld));
+    env.insert("JOYRIDE_PYTHON", python());
+    env.insert("CC", usr + "/lib/joyride/cc/joyride-cc");
+    env.remove("PYTHONHOME"), env.remove("PYTHONPATH");
+    return env;
+}
+QString Backend::python() const {
+    QString usr = appUsr();
+    return usr.isEmpty() ? sourceDir() + "/.venv/bin/python" : usr + "/lib/joyride/python/bin/python3";
+}
+
 QString Backend::joyrideBinary() const { return sourceDir() + "/build/joyride"; }
 bool Backend::joyrideReady() const { return QFileInfo(joyrideBinary()).isExecutable(); }
 QString Backend::cfgPath() const { return q(jl::dataRoot()) + "/joyride.cfg"; }
@@ -167,32 +189,41 @@ void Backend::prepare() {
     if (busy()) return;
     QString src = sourceDir(), gta = q(jl::playDir("gta1"));
     if (gta.isEmpty()) { error_ = "Install Grand Theft Auto first"; emit busyChanged(); return; }
-    // what the build needs on this computer (the libraries' development
-    // files are CMake's to find: it says which in the log)
-    QStringList missing;
-    for (const char *t : { "python3", "cmake", "ninja", "gcc", "pkg-config" })
-        if (QStandardPaths::findExecutable(t).isEmpty()) missing << t;
-    if (!missing.isEmpty()) {
-        error_ = "joyride is built on this computer, and it needs " + missing.join(", ") +
-                 ". Install them (and the development files of SDL3, SDL3_ttf, ffmpeg and Vulkan), then try again.";
-        emit busyChanged();
-        return;
+    bool app = !appUsr().isEmpty();             // an AppImage: everything needed is in it
+    if (!app) {
+        // what the build needs on this computer (the libraries' development
+        // files are CMake's to find: it says which in the log)
+        QStringList missing;
+        for (const char *t : { "python3", "cmake", "ninja", "gcc", "pkg-config" })
+            if (QStandardPaths::findExecutable(t).isEmpty()) missing << t;
+        if (!missing.isEmpty()) {
+            error_ = "joyride is built on this computer, and it needs " + missing.join(", ") +
+                     ". Install them (and the development files of SDL3, SDL3_ttf, ffmpeg and Vulkan), then try again.";
+            emit busyChanged();
+            return;
+        }
     }
     begin("Preparing joyride");
     if (!syncSource()) { end(false, "cannot copy joyride's source to " + src); return; }
     if (!QFileInfo::exists(src + "/tools/lift.sh")) { end(false, "joyride's source folder was not found (set JOYRIDE_SOURCE_DIR)"); return; }
     steps_.clear();
-    if (!QFileInfo::exists(src + "/external/pcrecomp/tools/__main__.py"))
-        steps_ << qMakePair(QString("git"), QStringList{ "submodule", "update", "--init", "--recursive" });
-    if (!QFileInfo::exists(src + "/.venv/bin/python"))
-        steps_ << qMakePair(QString("python3"), QStringList{ "-m", "venv", ".venv" });
-    steps_ << qMakePair(src + "/.venv/bin/pip", QStringList{ "install", "-q", "-r", "tools/requirements.txt" });   // new ones too
-    steps_ << qMakePair(src + "/tools/lift.sh", QStringList{ gta + "/WINO/Grand Theft Auto.exe" });
-    if (!QFileInfo::exists(src + "/build/build.ninja"))
-        steps_ << qMakePair(QString("cmake"), QStringList{ "-S", ".", "-B", "build", "-G", "Ninja" });
-    steps_ << qMakePair(QString("cmake"), QStringList{ "--build", "build" });
+    if (app) {
+        // the game made from GTA's own executable, linked to the runtime the AppImage carries
+        steps_ << qMakePair(src + "/tools/lift.sh", QStringList{ gta + "/WINO/Grand Theft Auto.exe" });
+        steps_ << qMakePair(src + "/tools/link-game.sh", QStringList{ appUsr() });
+    } else {
+        if (!QFileInfo::exists(src + "/external/pcrecomp/tools/__main__.py"))
+            steps_ << qMakePair(QString("git"), QStringList{ "submodule", "update", "--init", "--recursive" });
+        if (!QFileInfo::exists(src + "/.venv/bin/python"))
+            steps_ << qMakePair(QString("python3"), QStringList{ "-m", "venv", ".venv" });
+        steps_ << qMakePair(src + "/.venv/bin/pip", QStringList{ "install", "-q", "-r", "tools/requirements.txt" });   // new ones too
+        steps_ << qMakePair(src + "/tools/lift.sh", QStringList{ gta + "/WINO/Grand Theft Auto.exe" });
+        if (!QFileInfo::exists(src + "/build/build.ninja"))
+            steps_ << qMakePair(QString("cmake"), QStringList{ "-S", ".", "-B", "build", "-G", "Ninja" });
+        steps_ << qMakePair(QString("cmake"), QStringList{ "--build", "build" });
+    }
     // the pictures around the menus on wide screens, from each game's own
-    steps_ << qMakePair(src + "/.venv/bin/python", QStringList{ "tools/backdrops.py", "--all", q(jl::dataRoot()) });
+    steps_ << qMakePair(python(), QStringList{ "tools/backdrops.py", "--all", q(jl::dataRoot()) });
     setProgress(0.02);
     runSteps();
 }
@@ -205,6 +236,7 @@ void Backend::runSteps() {
     addLog("$ " + QFileInfo(prog).fileName() + " " + args.join(' '));
     proc_ = new QProcess(this);
     proc_->setWorkingDirectory(sourceDir());
+    proc_->setProcessEnvironment(toolEnv());
     proc_->setProcessChannelMode(QProcess::MergedChannels);
     connect(proc_, &QProcess::readyRead, this, [this] { addLog(QString::fromLocal8Bit(proc_->readAll()).trimmed()); });
     connect(proc_, &QProcess::finished, this, [this](int code, QProcess::ExitStatus st) {
@@ -232,17 +264,18 @@ void Backend::play(const QString &id) {
         return;
     }
     // this game's picture around the menus, made the first time (a few seconds)
-    QString pic = q(jl::dataRoot()) + "/extracted/menu/" + id + ".png", py = sourceDir() + "/.venv/bin/python";
+    QString pic = q(jl::dataRoot()) + "/extracted/menu/" + id + ".png", py = python();
     if (!QFileInfo::exists(pic) && QFileInfo::exists(py)) {
         QProcess mk;
         mk.setWorkingDirectory(sourceDir());
+        mk.setProcessEnvironment(toolEnv());
         mk.start(py, { "tools/backdrops.py", id, dir + "/GTADATA", pic });
         if (!mk.waitForFinished(60000)) mk.kill();
     }
     QProcess p;                                          // its program, arguments and environment
     p.setProgram(joyrideBinary());
     p.setArguments({ dir });
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    QProcessEnvironment env = toolEnv();                  // an AppImage's libraries too
     if (id != "gta1") env.insert("JOYRIDE_PROFILE", id);    // London's saves and maps apart from GTA's
     p.setProcessEnvironment(env);
     auto *game = new QProcess(this);                     // the launcher steps aside while it runs
