@@ -71,6 +71,7 @@ rm -rf "$work/winlibs"
   for f in lib/*; do [ "$(basename "$f")" = gcc ] || rm -rf "$f"; done
   T=x86_64-w64-mingw32
   for f in $T/bin/*; do case "$(basename "$f")" in as.exe|ld.exe|ld.bfd.exe|ar.exe) ;; *) rm -rf "$f";; esac; done
+  cp -n bin/*.dll "$T/bin/"                      # (gcc runs these: Windows finds their DLLs, and theirs, beside them)
   # the libraries: the C runtime's, GCC's and those a link names
   for f in $T/lib/lib*; do
       case "$(basename "$f")" in
