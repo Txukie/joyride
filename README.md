@@ -300,22 +300,32 @@ Installs go to `~/.local/share/joyride/games/`. On starting, the launcher puts i
 `~/.local/share/icons/`, so the desktop knows it (its icon, the menu entry).
 B (Esc) goes back a page, and on the first one closes the launcher.
 
-## Windows (in progress)
+## Windows
 
-joyride cross-compiles for Windows with MinGW-w64 and plays under Wine: the
-same runtime (pcrecomp's win32hle, which answers the game's Win32 itself),
-with what it takes from POSIX supplied in `src/compat/win/` (guest memory on
-VirtualAlloc, paths, files, sockets on Winsock). Not packaged yet.
+joyride runs on Windows with the same runtime (pcrecomp's win32hle, which
+answers the game's Win32 itself), with what it takes from POSIX supplied
+in `src/compat/win/`. The release is a zip: unzip it, run
+`joyride-launcher.exe`, install GTA from your own copy and prepare joyride;
+the launcher makes it on your machine with the Python and GCC the zip
+carries (nothing to install). Its data is in `%LOCALAPPDATA%\joyride`.
+
+Making the zip, on Linux (MinGW-w64, CMake, Ninja, glslc, pacman):
 
 ```bash
-cmake -S . -B build-win -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64.cmake \
-      -DCMAKE_PREFIX_PATH="<SDL3 and SDL3_ttf's MinGW development folders>/x86_64-w64-mingw32" \
-      -DJOYRIDE_WITH_FFMPEG=OFF
-cmake --build build-win      # then SDL3.dll, SDL3_ttf.dll, libwinpthread-1.dll beside joyride.exe
+tools/windows-bundle.sh      # joyride's runtime (no game code), Python, GCC: build-win/bundle
+cmake -S launcher -B build-win/launcher -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_TOOLCHAIN_FILE=$PWD/cmake/mingw-w64.cmake \
+      -DCMAKE_PREFIX_PATH=$PWD/build-win/msys/root/ucrt64 -DQT_HOST_PATH=/usr
+cmake --build build-win/launcher
+tools/windows-package.sh     # build-win/joyride-<version>-windows-x64.zip
 ```
 
-`tools/wine-run.sh` plays that build under Wine, in its own prefix
-(`~/.local/share/joyride-wine`), with your GTA folder and menu pictures.
+What they use goes in `build-win/`: SDL3's and SDL3_ttf's MinGW packages,
+the embeddable Python, WinLibs' GCC and the tools' Windows wheels in
+`deps/`; Qt, libarchive and ffmpeg from MSYS2's UCRT64 packages in
+`msys/root` (`fakeroot pacman --config build-win/msys/pacman.conf -S ...`).
+`tools/wine-run.sh` plays a build from the source (`cmake/mingw-w64.cmake`,
+build-win/w) under Wine.
 
 ## Getting started
 
