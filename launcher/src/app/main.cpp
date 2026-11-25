@@ -22,7 +22,8 @@
 static void install_desktop_entry() {
     QString data = qEnvironmentVariable("XDG_DATA_HOME");
     if (data.isEmpty()) data = QDir::homePath() + "/.local/share";
-    QString exe = QFileInfo("/proc/self/exe").canonicalFilePath();
+    QString exe = qEnvironmentVariable("APPIMAGE");        // an AppImage: the file itself, not its mount
+    if (exe.isEmpty()) exe = QFileInfo("/proc/self/exe").canonicalFilePath();
     if (exe.isEmpty()) return;
     QString entry = "[Desktop Entry]\nType=Application\nName=joyride\nComment=Grand Theft Auto, London 1969 and 1961, recompiled\n"
                     "Exec=\"" + exe + "\"\nIcon=joyride\nTerminal=false\nCategories=Game;\nStartupWMClass=joyride\n";
@@ -53,6 +54,7 @@ int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
     app.setApplicationName("joyride");
     app.setOrganizationName("joyride");
+    app.setApplicationVersion(JOYRIDE_VERSION);
     app.setDesktopFileName("joyride");
     QIcon icon;
     for (int n : { 16, 32, 48, 64, 128, 256 }) icon.addFile(QString(":/art/joyride-%1.png").arg(n), QSize(n, n));

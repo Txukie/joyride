@@ -9,6 +9,7 @@
 #include <QFileInfo>
 #include <QProcessEnvironment>
 #include <QScreen>
+#include <QDirIterator>
 #include <QGuiApplication>
 #include <QStandardPaths>
 #include <QThread>
@@ -26,12 +27,42 @@ Backend::Backend(QObject *parent) : QObject(parent) {}
 
 QString Backend::homeDir() const { return QDir::homePath(); }
 
-// joyride's checkout: JOYRIDE_SOURCE_DIR (the environment, then the one this
-// launcher was built from)
+// joyride's source: JOYRIDE_SOURCE_DIR; from an AppImage, a copy of the
+// one it carries in joyride's data folder (the AppImage is read-only, and
+// the build happens there); else the checkout this launcher was built from
 QString Backend::sourceDir() const {
     QString e = qEnvironmentVariable("JOYRIDE_SOURCE_DIR");
-    return !e.isEmpty() ? e : QString(JOYRIDE_SOURCE_DIR);
+    if (!e.isEmpty()) return e;
+    if (!bundledSource().isEmpty()) return q(jl::dataRoot()) + "/src";
+    return QString(JOYRIDE_SOURCE_DIR);
 }
+QString Backend::bundledSource() const {
+    QString app = qEnvironmentVariable("APPDIR");
+    QString b = app + "/usr/share/joyride/src";
+    return !app.isEmpty() && QFileInfo::exists(b + "/tools/lift.sh") ? b : QString();
+}
+// the AppImage's source copied out when it is not there or not this
+// version's; what was made in it (gen/, build/, .venv/) stays
+bool Backend::syncSource() {
+    QString from = bundledSource();
+    if (from.isEmpty()) return true;
+    QString to = sourceDir();
+    QFile stampIn(from + "/.joyride-version"), stampOut(to + "/.joyride-version");
+    QByteArray want = stampIn.open(QIODevice::ReadOnly) ? stampIn.readAll() : QByteArray();
+    if (!want.isEmpty() && stampOut.open(QIODevice::ReadOnly) && stampOut.readAll() == want) return true;
+    stampOut.close();
+    addLog("Copying joyride's source to " + to);
+    QDirIterator it(from, QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        QString f = it.next(), rel = QDir(from).relativeFilePath(f), dst = to + "/" + rel;
+        QDir().mkpath(QFileInfo(dst).path());
+        QFile::remove(dst);
+        if (!QFile::copy(f, dst)) { addLog("cannot copy " + rel); return false; }
+        QFile::setPermissions(dst, QFile::permissions(f) | QFileDevice::WriteOwner | QFileDevice::ReadOwner);
+    }
+    return true;
+}
+
 QString Backend::joyrideBinary() const { return sourceDir() + "/build/joyride"; }
 bool Backend::joyrideReady() const { return QFileInfo(joyrideBinary()).isExecutable(); }
 QString Backend::cfgPath() const { return q(jl::dataRoot()) + "/joyride.cfg"; }
@@ -135,9 +166,21 @@ void Backend::cancel() {
 void Backend::prepare() {
     if (busy()) return;
     QString src = sourceDir(), gta = q(jl::playDir("gta1"));
-    if (src.isEmpty() || !QFileInfo::exists(src + "/tools/lift.sh")) { error_ = "joyride's source folder was not found (set JOYRIDE_SOURCE_DIR)"; emit busyChanged(); return; }
     if (gta.isEmpty()) { error_ = "Install Grand Theft Auto first"; emit busyChanged(); return; }
+    // what the build needs on this computer (the libraries' development
+    // files are CMake's to find: it says which in the log)
+    QStringList missing;
+    for (const char *t : { "python3", "cmake", "ninja", "gcc", "pkg-config" })
+        if (QStandardPaths::findExecutable(t).isEmpty()) missing << t;
+    if (!missing.isEmpty()) {
+        error_ = "joyride is built on this computer, and it needs " + missing.join(", ") +
+                 ". Install them (and the development files of SDL3, SDL3_ttf, ffmpeg and Vulkan), then try again.";
+        emit busyChanged();
+        return;
+    }
     begin("Preparing joyride");
+    if (!syncSource()) { end(false, "cannot copy joyride's source to " + src); return; }
+    if (!QFileInfo::exists(src + "/tools/lift.sh")) { end(false, "joyride's source folder was not found (set JOYRIDE_SOURCE_DIR)"); return; }
     steps_.clear();
     if (!QFileInfo::exists(src + "/external/pcrecomp/tools/__main__.py"))
         steps_ << qMakePair(QString("git"), QStringList{ "submodule", "update", "--init", "--recursive" });

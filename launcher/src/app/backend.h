@@ -19,6 +19,7 @@ class Backend : public QObject {
     Q_PROPERTY(QStringList steamInstalls READ steamInstalls NOTIFY changed)
     Q_PROPERTY(QString homeDir READ homeDir CONSTANT)
     Q_PROPERTY(bool playing READ playing NOTIFY playingChanged)
+    Q_PROPERTY(QString version READ version CONSTANT)
     Q_PROPERTY(bool fullscreen READ fullscreen NOTIFY settingsChanged)   // the launcher too, as the game
 
 public:
@@ -34,6 +35,7 @@ public:
     QStringList steamInstalls() const;
     QString homeDir() const;
     bool playing() const { return playing_; }
+    QString version() const { return QStringLiteral(JOYRIDE_VERSION); }
     bool fullscreen() const { return readCfg().value("fullscreen") != "0"; }
 
     Q_INVOKABLE void installFrom(const QString &id, const QString &path);
@@ -68,7 +70,9 @@ private:
     void runInstall(const QString &id, const QString &path);
     void runSteps();                                                // prepare()'s commands, one after another
 
-    QString sourceDir() const;                                      // joyride's checkout (build/, tools/)
+    QString sourceDir() const;                                      // joyride's source (build/, tools/)
+    QString bundledSource() const;                                  // the AppImage's, or empty
+    bool syncSource();                                              // copied out of the AppImage
     QString joyrideBinary() const;
     QString cfgPath() const;
     QMap<QString, QString> readCfg() const;

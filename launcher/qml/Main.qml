@@ -44,6 +44,7 @@ ApplicationWindow {
             anchors { fill: parent; leftMargin: 40; rightMargin: 40 }
             Image { source: "qrc:/art/joyride-128.png"; sourceSize.width: 128; Layout.preferredWidth: 48; Layout.preferredHeight: 48; Layout.rightMargin: 12; smooth: true; mipmap: true }
             Text { text: "joyride"; color: win.accent; font.pixelSize: 40; font.bold: true }
+            Text { text: backend.version; color: win.dim; font.pixelSize: 16; Layout.alignment: Qt.AlignBottom; Layout.bottomMargin: 26; Layout.leftMargin: 6 }
             Text { text: stack.depth > 1 && stack.currentItem.title ? "›  " + stack.currentItem.title : ""; color: win.text; font.pixelSize: 26; Layout.leftMargin: 16 }
             Item { Layout.fillWidth: true }
             Text {

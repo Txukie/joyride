@@ -4,7 +4,7 @@
 # code first:
 #   cmake -S launcher -B build-launcher -G Ninja && cmake --build build-launcher
 cmake_minimum_required(VERSION 3.21)
-project(joyride_launcher CXX)
+project(joyride_launcher VERSION 1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -47,7 +47,7 @@ if(Qt6_FOUND AND SDL3_FOUND)
     target_link_libraries(joyride-launcher PRIVATE joyride_setup Qt6::Quick Qt6::QuickControls2 SDL3::SDL3)
     # where joyride's checkout is: preparing runs its tools/lift.sh and build
     get_filename_component(JOYRIDE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
-    target_compile_definitions(joyride-launcher PRIVATE JOYRIDE_SOURCE_DIR="${JOYRIDE_SOURCE_DIR}")
+    target_compile_definitions(joyride-launcher PRIVATE JOYRIDE_SOURCE_DIR="${JOYRIDE_SOURCE_DIR}" JOYRIDE_VERSION="${PROJECT_VERSION}")
     target_compile_options(joyride-launcher PRIVATE -Wall -Wextra)
 else()
     message(WARNING "Qt 6 (Quick, QuickControls2) or SDL3 not found: only joyride-setup is built")
