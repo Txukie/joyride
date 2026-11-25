@@ -296,6 +296,20 @@ Installs go to `~/.local/share/joyride/games/`. On starting, the launcher puts i
 `~/.local/share/icons/`, so the desktop knows it (its icon, the menu entry).
 B (Esc) goes back a page, and on the first one closes the launcher.
 
+## Windows (in progress)
+
+joyride cross-compiles for Windows with MinGW-w64 and plays under Wine: the
+same runtime (pcrecomp's win32hle, which answers the game's Win32 itself),
+with what it takes from POSIX supplied in `src/compat/win/` (guest memory on
+VirtualAlloc, paths, files, sockets on Winsock). Not packaged yet.
+
+```bash
+cmake -S . -B build-win -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64.cmake \
+      -DCMAKE_PREFIX_PATH="<SDL3 and SDL3_ttf's MinGW development folders>/x86_64-w64-mingw32" \
+      -DJOYRIDE_WITH_FFMPEG=OFF
+cmake --build build-win      # then SDL3.dll, SDL3_ttf.dll, libwinpthread-1.dll beside joyride.exe
+```
+
 ## Getting started
 
 ```bash

@@ -20,6 +20,9 @@
  * +0x68, Palette[768] +0x6C, FrameNum +0x374, LastRectx/y/w/h +0x380..+0x38C.
  */
 #define _GNU_SOURCE
+#ifndef JOYRIDE_OSPATH
+#define JOYRIDE_OSPATH(p) (p)            /* Windows: compat/win/posix_win.h */
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -175,7 +178,7 @@ static void s_SmackOpen(void) {
         RET(0, 3);
     }
     movie_t *m = (movie_t *)calloc(1, sizeof *m);
-    if (!m || avformat_open_input(&m->fmt, host, NULL, NULL) < 0 || avformat_find_stream_info(m->fmt, NULL) < 0) {
+    if (!m || avformat_open_input(&m->fmt, JOYRIDE_OSPATH(host), NULL, NULL) < 0 || avformat_find_stream_info(m->fmt, NULL) < 0) {
         fprintf(stderr, "[smack] SmackOpen(%s): ffmpeg cannot read it\n", name);
         movie_free(m);
         RET(0, 3);

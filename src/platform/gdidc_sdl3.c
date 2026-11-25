@@ -20,6 +20,9 @@
  * Mono, else DejaVu, found by fontconfig (fc-match) or in the usual places.
  */
 #define _GNU_SOURCE
+#ifndef JOYRIDE_OSPATH
+#define JOYRIDE_OSPATH(p) (p)            /* Windows: compat/win/posix_win.h */
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -130,7 +133,7 @@ static int font_data(const char *path) {                 /* its slot, read on fi
 }
 static TTF_Font *open_font(const char *path, int size) {
     int i = font_data(path);
-    if (i < 0) return TTF_OpenFont(path, (float)size);
+    if (i < 0) return TTF_OpenFont(JOYRIDE_OSPATH(path), (float)size);
     return TTF_OpenFontIO(SDL_IOFromConstMem(g_font_files[i].data, g_font_files[i].n), true, (float)size);
 }
 /* Whether Windows smooths this face at this size: its 'gasp' table says,

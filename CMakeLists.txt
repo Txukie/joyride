@@ -49,6 +49,15 @@ endif()
 
 # Guest memory: one 4 GB block at this host address; ADDR(va) adds it as a constant.
 set(JOYRIDE_DEFS RECOMP_MEM_BASE=0x100000000000ull)
+if(WIN32)
+    # recomp_types.h defines its shared globals in every file, weakly, for the
+    # linker to keep one: ELF does, PE/COFF keeps every file's own (50 copies:
+    # the lifted loops' yield hook was set in one and NULL in the rest, and the
+    # game waited for a timer tick forever). On Windows they are link-once
+    # instead, selectany when initialised and common when not, in the game
+    # and the runtime alike
+    set(JOYRIDE_ONCE_FLAGS -Dweak=selectany -fcommon)
+endif()
 
 # --- the lifted game: huge, machine-made; build it fast and quietly ---------
 # (tools/link-game.sh compiles it with these same flags on a player's machine)
@@ -58,6 +67,7 @@ if(NOT JOYRIDE_RUNTIME_ONLY)
     target_compile_definitions(joyride_gen PRIVATE ${JOYRIDE_DEFS})
     target_compile_options(joyride_gen PRIVATE -O1 -w "SHELL:-include ${JOYRIDE_GEN_DIR}/recomp_funcs.h"
         "SHELL:-include ${CMAKE_SOURCE_DIR}/src/hle/texfilter_inline.h")   # the filter's per-pixel part, inlined
+    target_compile_options(joyride_gen PRIVATE ${JOYRIDE_ONCE_FLAGS})
 endif()
 
 # --- pcrecomp's Win32 layer, minus its selftests and the four files that use
@@ -65,11 +75,26 @@ endif()
 # gdidc.c and dsound.c by SDL3 ports of themselves (src/platform/).
 file(GLOB WIN32HLE_SOURCES "${PCRECOMP}/runtime/win32hle/*.c")
 list(FILTER WIN32HLE_SOURCES EXCLUDE REGEX "(_selftest|/screen|/present|/gdidc|/dsound)\\.c$")
+if(WIN32)
+    # joyride on Windows (cmake/mingw-w64.cmake): what the runtime takes from
+    # POSIX, kept here (src/compat/win/); no guest Winsock (GTA's network play
+    # is DirectPlay, joyride's own)
+    list(FILTER WIN32HLE_SOURCES EXCLUDE REGEX "/wsock32\\.c$")
+    add_library(joyride_compat STATIC src/compat/win/compat_win.c)
+    target_include_directories(joyride_compat PRIVATE src/compat/win)
+    set(JOYRIDE_COMPAT_FLAGS "SHELL:-include ${CMAKE_SOURCE_DIR}/src/compat/win/posix_win.h")
+endif()
 add_library(win32hle STATIC ${WIN32HLE_SOURCES}
     src/platform/screen_sdl3.c
     src/platform/gdidc_sdl3.c
     src/platform/dsound_sdl3.c)
 target_include_directories(win32hle PRIVATE src/hle)
+if(WIN32)
+    target_sources(win32hle PRIVATE src/compat/win/wsock32_none.c)
+    target_include_directories(win32hle BEFORE PUBLIC src/compat/win)
+    target_compile_options(win32hle PUBLIC ${JOYRIDE_COMPAT_FLAGS} ${JOYRIDE_ONCE_FLAGS})
+    target_link_libraries(win32hle PUBLIC joyride_compat ws2_32)
+endif()
 # the window's icon (art/joyride-128.png, joyride's own), in the program
 file(READ "${CMAKE_SOURCE_DIR}/art/joyride-128.png" JOYRIDE_ICON HEX)
 string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," JOYRIDE_ICON "${JOYRIDE_ICON}")

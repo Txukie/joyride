@@ -23,23 +23,55 @@
  * touch guest memory only on the game's thread, and give the machine up
  * while they wait (enumerating, connecting, joining).
  *
- * POSIX sockets; Windows (Winsock) and macOS builds come with those ports.
+ * POSIX sockets; on Windows, Winsock with the differences below.
  */
 #define _GNU_SOURCE
-#include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <poll.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
+#ifdef _WIN32
+/* Winsock: sockets closed with closesocket, made non-blocking with
+ * ioctlsocket, polled with WSAPoll, their errors in WSAGetLastError, their
+ * options' values as char pointers; started once */
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#define close(fd) closesocket(fd)
+#define poll WSAPoll
+typedef ULONG nfds_t;
+#define MSG_NOSIGNAL 0
+#ifndef F_GETFL
+#define F_GETFL 3
+#define F_SETFL 4
+#endif
+#ifndef O_NONBLOCK
+#define O_NONBLOCK 0x800
+#endif
+static int sock_fcntl(int fd, int cmd, int flags) {
+    if (cmd != F_SETFL) return 0;
+    u_long on = (flags & O_NONBLOCK) != 0;
+    return ioctlsocket((SOCKET)fd, FIONBIO, &on);
+}
+#define fcntl(fd, cmd, ...) sock_fcntl(fd, cmd, 0 __VA_OPT__(+) __VA_ARGS__)
+#define setsockopt(s, l, o, v, n) setsockopt(s, l, o, (const char *)(v), n)
+static int sock_errno(void) {
+    int e = WSAGetLastError();
+    return e == WSAEWOULDBLOCK ? EWOULDBLOCK : e == WSAEINTR ? EINTR : e == WSAEINPROGRESS ? EINPROGRESS : e;
+}
+__attribute__((constructor)) static void sock_start(void) { WSADATA w; WSAStartup(MAKEWORD(2, 2), &w); }
+#else
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <poll.h>
+#include <sys/socket.h>
+#define sock_errno() errno
+#endif
 
 #include "win32hle.h"
 #include "joyride_hle.h"
@@ -176,8 +208,9 @@ static int send_all(int fd, const void *buf, size_t n) {
     const uint8_t *p = (const uint8_t *)buf;
     while (n) {
         ssize_t k = send(fd, p, n, MSG_NOSIGNAL);
-        if (k < 0 && errno == EINTR) continue;
-        if (k < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        int e = k < 0 ? sock_errno() : 0;
+        if (k < 0 && e == EINTR) continue;
+        if (k < 0 && (e == EAGAIN || e == EWOULDBLOCK)) {
             struct pollfd pf = { fd, POLLOUT, 0 };
             if (poll(&pf, 1, 2000) <= 0) return -1;
             continue;
@@ -365,7 +398,8 @@ static void client_frame(int type, const uint8_t *p, size_t n) {
 /* Read what a connection has; hand each whole frame to fn. 0: closed. */
 static int pump_conn(conn_t *cn, void (*fn)(void *ctx, int type, const uint8_t *p, size_t n), void *ctx) {
     ssize_t k = recv(cn->fd, cn->in + cn->in_n, sizeof cn->in - cn->in_n, 0);
-    if (k == 0 || (k < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)) return 0;
+    int e = k < 0 ? sock_errno() : 0;
+    if (k == 0 || (k < 0 && e != EAGAIN && e != EWOULDBLOCK && e != EINTR)) return 0;
     if (k > 0) cn->in_n += (size_t)k;
     size_t off = 0;
     while (cn->in_n - off >= 5) {

@@ -33,3 +33,4 @@ __pycache__/
 # Python tooling environment
 .venv/
 build-appimage/
+build-win/

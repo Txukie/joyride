@@ -11,6 +11,9 @@
  * delta.jpg (read through ffmpeg, as the intro movie is, when joyride has
  * it). None: bars, as before.
  */
+#ifndef JOYRIDE_OSPATH
+#define JOYRIDE_OSPATH(p) (p)            /* Windows: compat/win/posix_win.h */
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,7 +33,7 @@ static uint8_t *g_px;                    /* bytes B, G, R, A (the screen's textu
 static int g_w, g_h;
 
 static int from_png(const char *path) {
-    SDL_Surface *s = SDL_LoadPNG(path);
+    SDL_Surface *s = SDL_LoadPNG(JOYRIDE_OSPATH(path));
     if (!s) return 0;
     SDL_Surface *c = SDL_ConvertSurface(s, SDL_PIXELFORMAT_BGRA32);
     SDL_DestroySurface(s);
@@ -50,7 +53,7 @@ static uint8_t clamp8(int v) { return v < 0 ? 0 : v > 255 ? 255 : (uint8_t)v; }
 /* one picture, decoded to planar YUV (JPEG's full range) or grey, made BGRA */
 static int from_jpeg(const char *path) {
     AVFormatContext *fmt = NULL;
-    if (avformat_open_input(&fmt, path, NULL, NULL) < 0) return 0;
+    if (avformat_open_input(&fmt, JOYRIDE_OSPATH(path), NULL, NULL) < 0) return 0;
     int ok = 0, si = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
     const AVCodec *dec = si >= 0 ? avcodec_find_decoder(fmt->streams[si]->codecpar->codec_id) : NULL;
     AVCodecContext *cx = dec ? avcodec_alloc_context3(dec) : NULL;

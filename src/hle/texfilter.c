@@ -39,7 +39,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#ifndef _WIN32
 #include <sys/uio.h>
+#endif
 #include <unistd.h>
 
 #include "joyride_hle.h"
@@ -303,6 +305,9 @@ static uint64_t hash(const uint8_t *p, size_t n) {
  * drawing a frame and its showing, as when a level ends mid-frame: a page
  * used then can no longer be read. Asked of the kernel, which answers
  * EFAULT instead of the fault reading it would be. */
+#ifdef _WIN32
+static int readable(const void *p, size_t n) { return joyride_readable(p, n); }   /* compat_win.c */
+#else
 static int readable(const void *p, size_t n) {
     static pid_t self;
     if (!self) self = getpid();
@@ -312,6 +317,7 @@ static int readable(const void *p, size_t n) {
         if (process_vm_readv(self, &loc, 1, &rem[i], 1, 0) != 1) return 0;
     return 1;
 }
+#endif
 
 /* pages used since the last frame whose texels changed since uploaded:
  * calls `up` with slot and 64 KB; palettes likewise with 256 colours */

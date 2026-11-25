@@ -191,6 +191,9 @@ static void frame_hook(const uint8_t *px, int w, int h, int pitch, int bpp) {
  * and its own city maps (map.c); the settings stay shared. */
 static void overlay_dir(char *out, size_t n) {
     const char *xdg = getenv("XDG_DATA_HOME"), *home = getenv("HOME"), *p = getenv("JOYRIDE_PROFILE");
+#ifdef _WIN32
+    if (!xdg || !*xdg) xdg = getenv("LOCALAPPDATA");       /* Windows: %LOCALAPPDATA%\joyride */
+#endif
     char suffix[80] = "";
     if (p && *p && !strchr(p, '/') && strcmp(p, ".") && strcmp(p, "..")) snprintf(suffix, sizeof suffix, "-%.64s", p);
     if (xdg && *xdg) snprintf(out, n, "%s/joyride/overlay%s", xdg, suffix);
