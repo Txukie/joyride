@@ -5,6 +5,7 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <mmsystem.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,6 +29,12 @@
  * to binary, not text (no CRLF translation, no stop at 0x1A); the game's
  * own reads go through them too */
 __attribute__((constructor)) static void binary_files(void) { _set_fmode(_O_BINARY); }
+
+/* Sleeps as short as asked: Windows' timer ticks every 15.6 ms unless a
+ * program asks for 1 ms, and joyride's waits (the frames' pacing, the
+ * frames between steps, the game's timers, handing the machine over) are
+ * a millisecond or two; at 15.6 the picture ran at about 20 frames a second */
+__attribute__((constructor)) static void fine_timer(void) { timeBeginPeriod(1); }
 
 static DWORD page_prot(int prot) {
     if (!prot) return PAGE_NOACCESS;

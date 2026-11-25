@@ -1381,6 +1381,19 @@ void hle_screen_pump(void) {
 
 /* ---- set-up -------------------------------------------------------------- */
 
+/* The GPU device: Vulkan first. joyride's shaders are SPIR-V (glslc), and
+ * on Windows SDL would pick Direct3D 12, which takes DXIL: the GPU renderer
+ * and filter then turned themselves off and the game drew on the CPU, at
+ * 20 frames a second. Another driver only if there is no Vulkan. */
+static SDL_GPUDevice *gpu_device(void) {
+    int debug = getenv("JOYRIDE_GPU_DEBUG") != NULL;
+    const SDL_GPUShaderFormat formats = SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL;
+    SDL_GPUDevice *d = SDL_CreateGPUDevice(formats, debug, "vulkan");
+    if (!d) d = SDL_CreateGPUDevice(formats, debug, NULL);
+    if (d) fprintf(stderr, "[screen] GPU: %s\n", SDL_GetGPUDeviceDriver(d));
+    return d;
+}
+
 int hle_screen_desktop(int *w, int *h) {
     if (g_headless || !SDL_WasInit(SDL_INIT_VIDEO)) return 0;
     const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(g_win ? SDL_GetDisplayForWindow(g_win) : SDL_GetPrimaryDisplay());
@@ -1406,8 +1419,7 @@ int hle_screen_open(const char *title, int fullscreen, int headless) {
     if (headless) {
         /* JOYRIDE_HEADLESS_GPU=1: a GPU device without a window (tests) */
         if (getenv("JOYRIDE_HEADLESS_GPU") && SDL_InitSubSystem(SDL_INIT_VIDEO))
-            g_gpu = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL,
-                                        getenv("JOYRIDE_GPU_DEBUG") != NULL, NULL);
+            g_gpu = gpu_device();
         return 0;
     }
 
@@ -1421,8 +1433,7 @@ int hle_screen_open(const char *title, int fullscreen, int headless) {
         SDL_Surface *icon = SDL_LoadPNG_IO(SDL_IOFromConstMem(joyride_icon_png, sizeof joyride_icon_png), true);
         if (icon) SDL_SetWindowIcon(g_win, icon), SDL_DestroySurface(icon);
     }
-    g_gpu = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL,
-                                getenv("JOYRIDE_GPU_DEBUG") != NULL, NULL);
+    g_gpu = gpu_device();
     if (!g_gpu || !SDL_ClaimWindowForGPUDevice(g_gpu, g_win)) {
         fprintf(stderr, "[screen] SDL_GPU: %s\n", SDL_GetError());
         return -1;

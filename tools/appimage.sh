@@ -133,6 +133,10 @@ for d in wayland-shell-integration wayland-decoration-client wayland-graphics-in
     cp -a "$qtplugins/$d" "$A/usr/plugins/"
     libs+=(--deploy-deps-only "$A/usr/plugins/$d")
 done
+# the AppImage's starter (AppImage's type2-runtime), fetched once and kept
+rtfile="$work/runtime-x86_64"
+[ -s "$rtfile" ] || curl -fsSL -o "$rtfile" https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
+LDAI_RUNTIME_FILE="$rtfile" \
 EXTRA_PLATFORM_PLUGINS="libqwayland.so;libqoffscreen.so" \
     NO_STRIP=1 PATCHELF="$(command -v patchelf)" QML_SOURCES_PATHS="$root/launcher/qml" QMAKE="$(command -v qmake6)" LINUXDEPLOY_OUTPUT_VERSION="$version" ARCH=x86_64 \
     linuxdeploy --appdir "$A" --plugin qt --output appimage \

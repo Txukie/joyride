@@ -93,7 +93,7 @@ if(WIN32)
     target_sources(win32hle PRIVATE src/compat/win/wsock32_none.c)
     target_include_directories(win32hle BEFORE PUBLIC src/compat/win)
     target_compile_options(win32hle PUBLIC ${JOYRIDE_COMPAT_FLAGS} ${JOYRIDE_ONCE_FLAGS})
-    target_link_libraries(win32hle PUBLIC joyride_compat ws2_32)
+    target_link_libraries(win32hle PUBLIC joyride_compat ws2_32 winmm)
 endif()
 # the window's icon (art/joyride-128.png, joyride's own), in the program
 file(READ "${CMAKE_SOURCE_DIR}/art/joyride-128.png" JOYRIDE_ICON HEX)
