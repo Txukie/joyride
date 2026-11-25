@@ -32,53 +32,56 @@ game (in play the game pauses while it is open). Up/Down pick, Left/Right
 change, Enter applies a screen size, F1 or Esc closes; on a controller the
 d-pad or left stick move, A accepts, B goes back. They are kept in `~/.local/share/joyride/joyride.cfg`.
 
-* **Screen size** — the game plays at 1024×768 on its own; any size joyride
-  offers from 640×480 to 3840×2160 (the common 4:3, 16:9, 16:10 and 21:9
-  sizes, and your desktop's), changed in play. Wider screens show more of
-  the city to the sides at the game's usual zoom, instead of the game's own
+In the order the menu shows them, the defaults first.
+
+*Graphics*
+
+* **Screen size** — your desktop's (default), the game's own 1024×768, or
+  any size joyride offers from 640×480 to 3840×2160 (the common 4:3, 16:9,
+  16:10 and 21:9 sizes), changed in play. Wider screens show more of the
+  city to the sides at the game's usual zoom, instead of the game's own
   behaviour of zooming in, and people and traffic are made and removed
-out of sight at the screen's real edges. Menus stay 640×480.
-* **Renderer** — software (default: the game's own rasterizer, as
-  released) or GPU: the world drawn by the graphics card the way the 3dfx
-  version did it, the CPU keeping only the geometry. Same picture; it keeps
-  the display's rate at any size (60 fps at 60 Hz up to 3440×1440, ~140 at
-  144 Hz), where the software renderer manages 23 at 2560×1440 and 17 at
-  3440×1440. Vulkan only for now. See
-  [`docs/exe-3dfx.md`](docs/exe-3dfx.md).
-* **HUD size** (GPU renderer) — the game draws its HUD at its 640×480
-  size whatever the screen; it is enlarged by whole times, piece by piece
-  (score and weapon stay in their corners, centred messages keep their
-  layout), the direction arrows with it: auto
-  (×3 at 4K, ×2 at 1080p and 1440p) or ×1–×4.
-* **Textures** — bilinear filtering, the 3dfx version's look (default), or
-  sharp. Filtered on the GPU like the 3dfx card did (Vulkan; on the CPU
-  elsewhere); see [`docs/exe-3dfx.md`](docs/exe-3dfx.md). 32-bit colour only.
+  out of sight at the screen's real edges. Menus stay 640×480.
+* **Fullscreen** — yes (default) or no (also F11 or Alt+Enter).
+* **Scaling** of the picture to the window: sharp (default), smooth,
+  nearest, integer.
+* **Renderer** — GPU (default): the world drawn by the graphics card, the
+  CPU keeping only the geometry; it keeps the display's rate at any size
+  (60 fps at 60 Hz up to 3440×1440, ~140 at 144 Hz). Or software: the
+  game's own rasterizer, as released, which manages 23 fps at 2560×1440
+  and 17 at 3440×1440. Same picture. Vulkan only for now; how it works is
+  in [`docs/exe-3dfx.md`](docs/exe-3dfx.md).
+* **Textures** — bilinear (default) or sharp. Filtered on the GPU (Vulkan;
+  on the CPU elsewhere). 32-bit colour only.
 * **Motion** — smooth (default): frames drawn between the game's own steps,
   up to the display's refresh rate, with the game's speed unchanged (it
   still steps 23.3 times a second; the picture runs one step, 43 ms,
-  behind). Or original: 23.3 frames a second. See
-  [`src/hle/smooth.c`](src/hle/smooth.c). At 1024×768 it reaches the
-  display's rate (60 fps at 60 Hz), filtered or not; larger sizes get fewer
-  as the software renderer takes longer (about 30–36 at 1920×1080). Turning the game's limiter
-  off (F8) still just runs the game faster.
+  behind). Or as released: 23.3 frames a second. See
+  [`src/hle/smooth.c`](src/hle/smooth.c). Turning the game's limiter off
+  (F8) still just runs the game faster.
+* **HUD size** (GPU renderer) — the game draws its HUD at its 640×480
+  size whatever the screen; it is enlarged by whole times, piece by piece
+  (score and weapon stay in their corners, centred messages keep their
+  layout), the direction arrows with it: auto (default: ×3 at 4K, ×2 at
+  1080p and 1440p) or ×1–×4.
+
+*Gameplay*
+
 * **Controller** — modern (default) or classic; see *Controllers* below.
-* **Scaling** of the picture to the window: sharp (default), smooth,
-  nearest, integer.
-* **Fullscreen** (also F11 or Alt+Enter).
-* **Drive-bys** — *as the game* (default: only where London 1961's
+* **Drive-bys** — *like in the game* (default: only where London 1961's
   missions allow them) or *always*, in every game: fire in a car shoots
   your weapon out of its side (see the Launcher section), except in a car
   with a bomb fitted, where fire is the bomb's. In a network game
   the host's choice is everyone's, for the whole game.
-* **Failed missions** — *as the game* (default: a failed job is gone) or
-  *can be retried*: a few seconds after "MISSION FAILED!" (or "FRENZY
+* **Retry missions** — yes (default) or no (as the game: a failed job is
+  gone). With it, a few seconds after "MISSION FAILED!" (or "FRENZY
   FAILED!") the city goes back by itself to how it was before the mission,
   so you can return to where it started and take it again: the phone
   rings again, a car you get into to start a job is back where it was
   parked (made again if it was wrecked; if you are still in it, it is
   yours to keep as it is and a new one is parked there), and the mission's
-  own cars and people are taken away so it starts afresh. Your score, weapons and place are kept. Not in
-  network games.
+  own cars and people are taken away so it starts afresh. Your score,
+  weapons and place are kept. Not in network games.
 
 **Pause menu and saving (Start, or F6).** GTA never let you save; joyride
 does. In play, Start (F6 or Esc on the keyboard) pauses with *Continue*, *Save

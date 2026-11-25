@@ -28,7 +28,11 @@
 #include "win32hle.h"
 #include "joyride_hle.h"
 
-joyride_settings joyride_cfg = { 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0 };
+/* the defaults: the desktop's size (set on loading), bilinear textures,
+ * sharp scaling, fullscreen, smooth motion, the GPU renderer, the modern
+ * controller, the HUD's size by the screen's, drive-bys as the game has
+ * them, failed missions retried */
+joyride_settings joyride_cfg = { 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1 };
 static char g_path[4096];
 
 /* ---- settings file ------------------------------------------------------- */
@@ -37,12 +41,16 @@ void joyride_config_load(const char *path) {
     snprintf(g_path, sizeof g_path, "%s", path);
     FILE *f = fopen(path, "r");
     char line[256];
+    int dw = 0, dh = 0;                            /* the desktop's size: the screen size unless one is set */
+    hle_screen_desktop(&dw, &dh);
+    if (joyride_display_valid(dw, dh)) joyride_cfg.res_w = dw, joyride_cfg.res_h = dh;
     while (f && fgets(line, sizeof line, f)) {
         char key[64], val[128];
         if (sscanf(line, " %63[^= ] = %127s", key, val) != 2) continue;
         if (!strcmp(key, "resolution")) {
             int w, h;
-            if (sscanf(val, "%dx%d", &w, &h) == 2 && joyride_display_valid(w, h)) joyride_cfg.res_w = w, joyride_cfg.res_h = h;
+            if (!strcmp(val, "game")) joyride_cfg.res_w = joyride_cfg.res_h = 0;
+            else if (sscanf(val, "%dx%d", &w, &h) == 2 && joyride_display_valid(w, h)) joyride_cfg.res_w = w, joyride_cfg.res_h = h;
         } else if (!strcmp(key, "filter")) joyride_cfg.filter = atoi(val) != 0;
         else if (!strcmp(key, "scaling")) {
             for (int i = 0; joyride_screen_scaling_name(i); i++)
@@ -88,7 +96,10 @@ void joyride_config_save(void) {
     FILE *f = fopen(tmp, "w");
     if (!f) return;
     fprintf(f, "# joyride settings (the F1 overlay writes this)\n");
-    if (joyride_cfg.res_w) fprintf(f, "resolution=%dx%d\n", joyride_cfg.res_w, joyride_cfg.res_h);
+    int dw = 0, dh = 0;
+    hle_screen_desktop(&dw, &dh);
+    if (joyride_cfg.res_w && joyride_cfg.res_w == dw && joyride_cfg.res_h == dh) fprintf(f, "resolution=desktop\n");
+    else if (joyride_cfg.res_w) fprintf(f, "resolution=%dx%d\n", joyride_cfg.res_w, joyride_cfg.res_h);
     else fprintf(f, "resolution=game\n");
     fprintf(f, "filter=%d\n", joyride_cfg.filter);
     fprintf(f, "scaling=%s\n", joyride_screen_scaling_name(joyride_cfg.scaling));
@@ -106,7 +117,12 @@ void joyride_config_save(void) {
 
 /* ---- the menu ------------------------------------------------------------ */
 
-enum { ITEM_RES, ITEM_RENDERER, ITEM_HUD, ITEM_FILTER, ITEM_SMOOTH, ITEM_CONTROLS, ITEM_DRIVEBY, ITEM_RETRY, ITEM_SCALING, ITEM_FULLSCREEN, ITEM_RESUME, ITEM_COUNT };
+/* in the order shown: the picture first, then the play */
+enum { ITEM_RES, ITEM_FULLSCREEN, ITEM_SCALING, ITEM_RENDERER, ITEM_FILTER, ITEM_SMOOTH, ITEM_HUD,
+       ITEM_CONTROLS, ITEM_DRIVEBY, ITEM_RETRY, ITEM_RESUME, ITEM_COUNT };
+static const char *item_group(int i) {
+    return i == ITEM_RES ? "Graphics" : i == ITEM_CONTROLS ? "Gameplay" : NULL;
+}
 
 static int g_open, g_sel;
 static int g_sizes[HLE_DD_MAX_MODES + 1][2], g_nsizes;   /* [0] = the game's own */
@@ -299,8 +315,10 @@ int joyride_overlay_key(int sc, int down, int repeat) {
 /* ---- drawing ------------------------------------------------------------- */
 
 static void size_name(int i, char *out, size_t n) {
-    if (!g_sizes[i][0]) snprintf(out, n, "1024 x 768 (game)");
-    else snprintf(out, n, "%d x %d", g_sizes[i][0], g_sizes[i][1]);
+    int dw = 0, dh = 0;
+    hle_screen_desktop(&dw, &dh);
+    if (!g_sizes[i][0]) snprintf(out, n, "1024 x 768 (the game's)");
+    else snprintf(out, n, "%d x %d%s", g_sizes[i][0], g_sizes[i][1], g_sizes[i][0] == dw && g_sizes[i][1] == dh ? " (desktop)" : "");
 }
 
 static void draw_pause(SDL_Renderer *r, float vw, float vh) {
@@ -340,7 +358,7 @@ void joyride_overlay_draw(uint32_t *bgra, int w, int h) {
     SDL_Renderer *r = SDL_CreateSoftwareRenderer(s);
     if (!r) { SDL_DestroySurface(s); return; }
 
-    int k = h / 240 < 1 ? 1 : h / 240;           /* 8x8 font: about 30 lines a screen */
+    int k = h / 320 < 1 ? 1 : h / 320;           /* 8x8 font: about 40 lines a screen */
     float vw = (float)w / k, vh = (float)h / k;   /* the canvas, in font pixels */
     SDL_SetRenderScale(r, (float)k, (float)k);
     SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
@@ -354,7 +372,72 @@ void joyride_overlay_draw(uint32_t *bgra, int w, int h) {
         return;
     }
 
-    const float pw = 37 * 8, ph = (ITEM_COUNT + 5) * 12;
+    /* the lines first, to size the panel by the longest */
+    enum { LABEL_COL = 17 };                          /* characters before the values */
+    char labels[ITEM_COUNT][32], vals[ITEM_COUNT][64];
+    int cw, ch;
+    joyride_display_current(&cw, &ch);
+    for (int i = 0; i < ITEM_COUNT; i++) {
+        char *label = labels[i], *val = vals[i];
+        label[0] = val[0] = 0;
+        switch (i) {
+        case ITEM_RES:
+            snprintf(label, 32, "Screen size");
+            size_name(g_size_i, val, 64);
+            break;
+        case ITEM_FULLSCREEN:
+            snprintf(label, 32, "Fullscreen");
+            snprintf(val, 64, "%s", joyride_cfg.fullscreen ? "yes" : "no");
+            break;
+        case ITEM_SCALING:
+            snprintf(label, 32, "Scaling");
+            snprintf(val, 64, "%s", joyride_screen_scaling_name(joyride_cfg.scaling));
+            break;
+        case ITEM_RENDERER:
+            snprintf(label, 32, "Renderer");
+            snprintf(val, 64, "%s", joyride_cfg.hwrender ? "GPU" : joyride_screen_hwrender() ? "software (as released)" : "software (no GPU here)");
+            break;
+        case ITEM_FILTER:
+            snprintf(label, 32, "Textures");
+            snprintf(val, 64, "%s", !joyride_cfg.filter ? "sharp" : joyride_texfilter == 2 ? "bilinear" : "bilinear (on the CPU)");
+            break;
+        case ITEM_SMOOTH:
+            snprintf(label, 32, "Motion");
+            snprintf(val, 64, "%s", joyride_cfg.smooth ? "smooth" : "as released (23 fps)");
+            break;
+        case ITEM_HUD:
+            snprintf(label, 32, "HUD size");
+            if (!joyride_cfg.hwrender) snprintf(val, 64, "as released (GPU only)");
+            else if (!joyride_cfg.hud) snprintf(val, 64, "auto (x%d)", joyride_screen_hud_scale(ch));
+            else snprintf(val, 64, "x%d", joyride_cfg.hud);
+            break;
+        case ITEM_CONTROLS:
+            snprintf(label, 32, "Controller");
+            snprintf(val, 64, "%s", joyride_cfg.controls_modern ? "modern (twin stick)" : "classic (tank)");
+            break;
+        case ITEM_DRIVEBY:
+            snprintf(label, 32, "Drive-bys");
+            if (joyride_net_driveby() >= 0)                  /* a network game: the host's */
+                snprintf(val, 64, "%s (host's rule)", joyride_net_driveby() ? "always" : "like in the game");
+            else snprintf(val, 64, "%s", joyride_cfg.driveby ? "always" : "like in the game");
+            break;
+        case ITEM_RETRY:
+            snprintf(label, 32, "Retry missions");
+            snprintf(val, 64, "%s", joyride_cfg.retry ? "yes" : "no (a failed one is lost)");
+            break;
+        case ITEM_RESUME:
+            snprintf(label, 32, "Resume");
+            break;
+        }
+    }
+    int cols = 24;
+    for (int i = 0; i < ITEM_COUNT; i++) {
+        int n = LABEL_COL + (int)strlen(vals[i]) + 4;
+        if (n > cols) cols = n;
+    }
+    int groups = 0;
+    for (int i = 0; i < ITEM_COUNT; i++) groups += item_group(i) != NULL;
+    const float pw = (float)(cols * 8 + 24), ph = (float)(ITEM_COUNT * 12 + groups * 16 + 4 + 20 + 8 + 10 + 18);
     SDL_FRect panel = { (vw - pw) / 2, (vh - ph) / 2, pw, ph };
     SDL_SetRenderDrawColor(r, 16, 16, 24, 235);
     SDL_RenderFillRect(r, &panel);
@@ -364,74 +447,25 @@ void joyride_overlay_draw(uint32_t *bgra, int w, int h) {
     float x = panel.x + 12, y = panel.y + 10;
     SDL_RenderDebugText(r, x, y, "joyride settings");
     y += 20;
-
-    int cw, ch;
-    joyride_display_current(&cw, &ch);
     for (int i = 0; i < ITEM_COUNT; i++, y += 12) {
-        char label[32] = "", val[64] = "";
-        switch (i) {
-        case ITEM_RES:
-            snprintf(label, sizeof label, "Screen size");
-            size_name(g_size_i, val, sizeof val);
-            break;
-        case ITEM_FILTER:
-            snprintf(label, sizeof label, "Textures");
-            snprintf(val, sizeof val, "%s", !joyride_cfg.filter ? "sharp" :
-                     joyride_texfilter == 2 ? "bilinear (3dfx, GPU)" : "bilinear (3dfx, CPU)");
-            break;
-        case ITEM_RENDERER:
-            snprintf(label, sizeof label, "Renderer");
-            snprintf(val, sizeof val, "%s", joyride_cfg.hwrender ? "GPU (3dfx-style)" :
-                     joyride_screen_hwrender() ? "software (original)" : "software (no GPU path)");
-            break;
-        case ITEM_HUD:
-            snprintf(label, sizeof label, "HUD size");
-            if (!joyride_cfg.hwrender) snprintf(val, sizeof val, "original (GPU renderer only)");
-            else if (!joyride_cfg.hud) snprintf(val, sizeof val, "auto (x%d)", joyride_screen_hud_scale(ch));
-            else snprintf(val, sizeof val, "x%d", joyride_cfg.hud);
-            break;
-        case ITEM_SMOOTH:
-            snprintf(label, sizeof label, "Motion");
-            snprintf(val, sizeof val, "%s", joyride_cfg.smooth ? "smooth" : "original (23 fps)");
-            break;
-        case ITEM_CONTROLS:
-            snprintf(label, sizeof label, "Controller");
-            snprintf(val, sizeof val, "%s", joyride_cfg.controls_modern ? "modern (twin stick)" : "classic (tank)");
-            break;
-        case ITEM_DRIVEBY:
-            snprintf(label, sizeof label, "Drive-bys");
-            if (joyride_net_driveby() >= 0)                  /* a network game: the host's */
-                snprintf(val, sizeof val, "%s (host's rule)", joyride_net_driveby() ? "always" : "as the game");
-            else snprintf(val, sizeof val, "%s", joyride_cfg.driveby ? "always" : "as the game (London 1961)");
-            break;
-        case ITEM_RETRY:
-            snprintf(label, sizeof label, "Failed missions");
-            snprintf(val, sizeof val, "%s", joyride_cfg.retry ? "can be retried" : "as the game (lost)");
-            break;
-        case ITEM_SCALING:
-            snprintf(label, sizeof label, "Scaling");
-            snprintf(val, sizeof val, "%s", joyride_screen_scaling_name(joyride_cfg.scaling));
-            break;
-        case ITEM_FULLSCREEN:
-            snprintf(label, sizeof label, "Fullscreen");
-            snprintf(val, sizeof val, "%s", joyride_cfg.fullscreen ? "on" : "off");
-            break;
-        case ITEM_RESUME:
-            snprintf(label, sizeof label, "Resume");
-            break;
-        }
+        if (item_group(i)) {                              /* a group's name */
+            y += 4;
+            SDL_SetRenderDrawColor(r, 150, 150, 150, 255);
+            SDL_RenderDebugText(r, x, y, item_group(i));
+            y += 12;
+        } else if (i == ITEM_RESUME) y += 4;
         if (i == g_sel) {
             SDL_FRect bar = { panel.x + 4, y - 2, pw - 8, 12 };
             SDL_SetRenderDrawColor(r, 70, 60, 10, 255);
             SDL_RenderFillRect(r, &bar);
         }
         SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
-        SDL_RenderDebugText(r, x, y, label);
-        if (val[0]) {
+        SDL_RenderDebugText(r, x + (i == ITEM_RESUME ? 0 : 8), y, labels[i]);
+        if (vals[i][0]) {
             char shown[80];
-            snprintf(shown, sizeof shown, i == g_sel ? "< %s >" : "  %s", val);
+            snprintf(shown, sizeof shown, i == g_sel ? "< %s >" : "  %s", vals[i]);
             SDL_SetRenderDrawColor(r, 230, 200, 40, 255);
-            SDL_RenderDebugText(r, x + 12 * 8, y, shown);
+            SDL_RenderDebugText(r, x + LABEL_COL * 8 - 16, y, shown);
         }
     }
     y += 8;

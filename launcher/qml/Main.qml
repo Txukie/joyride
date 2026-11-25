@@ -346,13 +346,27 @@ ApplicationWindow {
                     Keys.onRightPressed: step(currentIndex, 1)
                     Keys.onReturnPressed: step(currentIndex, 1)
                     Keys.onEnterPressed: step(currentIndex, 1)
-                    highlight: Rectangle { color: "#262a30"; radius: 10; border.color: rows.activeFocus ? "#ffffff" : "transparent"; border.width: 2 }
-                    highlightMoveDuration: 80
                     delegate: Item {
+                        id: setting
                         width: ListView.view.width
-                        height: 60
+                        // the first of a group has the group's name over it
+                        property bool first: index === 0 || sp.model[index - 1].group !== modelData.group
+                        height: 60 + (first ? 44 : 0)
                         property var opts: modelData.options
                         function labelOf(v) { for (var k = 0; k < opts.length; k++) if (opts[k].value === v) return opts[k].label; return v }
+                        Text { visible: first; y: 10; x: 4; text: modelData.group; color: win.dim; font.pixelSize: 18; font.bold: true; font.capitalization: Font.AllUppercase; font.letterSpacing: 2 }
+                        Item {
+                        id: row
+                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                        height: 60
+                        Rectangle {                      // the one chosen (the group's name stays outside it)
+                            anchors.fill: parent
+                            radius: 10
+                            visible: setting.ListView.isCurrentItem
+                            color: "#262a30"
+                            border.color: rows.activeFocus ? "#ffffff" : "transparent"
+                            border.width: 2
+                        }
                         Text { anchors.verticalCenter: parent.verticalCenter; x: 20; text: modelData.label; color: win.text; font.pixelSize: 22 }
                         Row {
                             anchors { right: parent.right; rightMargin: 20; verticalCenter: parent.verticalCenter }
@@ -360,6 +374,7 @@ ApplicationWindow {
                             Text { text: "◀"; color: win.dim; font.pixelSize: 20; MouseArea { anchors.fill: parent; anchors.margins: -10; onClicked: { rows.currentIndex = index; rows.step(index, -1) } } }
                             Text { text: labelOf(modelData.value); color: win.accent; font.pixelSize: 22; width: 420; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight }
                             Text { text: "▶"; color: win.dim; font.pixelSize: 20; MouseArea { anchors.fill: parent; anchors.margins: -10; onClicked: { rows.currentIndex = index; rows.step(index, 1) } } }
+                        }
                         }
                         MouseArea { anchors.fill: parent; z: -1; onClicked: rows.currentIndex = index }
                     }

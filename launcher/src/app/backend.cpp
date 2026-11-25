@@ -8,6 +8,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QProcessEnvironment>
+#include <QScreen>
+#include <QGuiApplication>
 #include <QStandardPaths>
 #include <QThread>
 #include <QTimer>
@@ -221,10 +223,11 @@ void Backend::play(const QString &id) {
 
 // ---- settings ------------------------------------------------------------------------
 
+// the same defaults as joyride's own (overlay.c)
 QMap<QString, QString> Backend::readCfg() const {
-    QMap<QString, QString> m{ { "resolution", "game" }, { "filter", "1" }, { "scaling", "sharp" }, { "fullscreen", "0" },
-                              { "smooth", "1" }, { "renderer", "software" }, { "controller", "modern" }, { "hud", "auto" },
-                              { "driveby", "game" }, { "retry", "0" } };
+    QMap<QString, QString> m{ { "resolution", "desktop" }, { "filter", "1" }, { "scaling", "sharp" }, { "fullscreen", "1" },
+                              { "smooth", "1" }, { "renderer", "gpu" }, { "controller", "modern" }, { "hud", "auto" },
+                              { "driveby", "game" }, { "retry", "1" } };
     QFile f(cfgPath());
     if (f.open(QIODevice::ReadOnly | QIODevice::Text))
         for (const QString &line : QString::fromUtf8(f.readAll()).split('\n')) {
@@ -236,29 +239,42 @@ QMap<QString, QString> Backend::readCfg() const {
 
 static QVariantMap opt(const QString &v, const QString &l) { return QVariantMap{ { "value", v }, { "label", l } }; }
 
+// the desktop's size in pixels (the screen the launcher is on)
+static QSize desktopSize() {
+    QScreen *sc = QGuiApplication::primaryScreen();
+    if (!sc) return {};
+    return sc->size() * sc->devicePixelRatio();
+}
+
 QVariantList Backend::settingsModel() const {
     auto cfg = readCfg();
-    QVariantList res{ opt("game", "The game's own (1024×768)") };
+    QSize d = desktopSize();
+    QString dname = d.isValid() ? QString("Desktop (%1×%2)").arg(d.width()).arg(d.height()) : QString("Desktop");
+    QVariantList res{ opt("desktop", dname), opt("game", "The game's own (1024×768)") };
     for (const char *r : { "1280x720", "1280x800", "1366x768", "1600x900", "1680x1050", "1920x1080", "1920x1200",
-                           "2560x1080", "2560x1440", "2560x1600", "3440x1440", "3840x2160" })
+                           "2560x1080", "2560x1440", "2560x1600", "3440x1440", "3840x2160" }) {
+        QStringList wh = QString(r).split('x');
+        if (d.isValid() && (wh[0].toInt() > d.width() || wh[1].toInt() > d.height())) continue;   // bigger than the screen
         res << opt(r, QString(r).replace('x', "×"));
-    bool known = false;                                  // a size set elsewhere (the F1 menu, the desktop's)
+    }
+    bool known = false;                                  // a size set elsewhere (the F1 menu)
     for (auto &o : res) known |= o.toMap()["value"] == cfg["resolution"];
     if (!known) res << opt(cfg["resolution"], QString(cfg["resolution"]).replace('x', "×"));
-    auto item = [&](const QString &key, const QString &label, const QVariantList &options) {
-        return QVariantMap{ { "key", key }, { "label", label }, { "options", options }, { "value", cfg.value(key) } };
+    auto item = [&](const QString &group, const QString &key, const QString &label, const QVariantList &options) {
+        return QVariantMap{ { "group", group }, { "key", key }, { "label", label }, { "options", options }, { "value", cfg.value(key) } };
     };
+    // as the F1 menu has them: the picture, then the play
     return {
-        item("resolution", "Screen size", res),
-        item("fullscreen", "Fullscreen", { opt("1", "On"), opt("0", "Off") }),
-        item("renderer", "Renderer", { opt("gpu", "GPU (3dfx look, any size at full speed)"), opt("software", "Software (as released)") }),
-        item("smooth", "Motion", { opt("1", "Smooth (display rate)"), opt("0", "The game's 23 steps a second") }),
-        item("filter", "Textures", { opt("1", "Filtered (3dfx)"), opt("0", "Sharp") }),
-        item("hud", "HUD size", { opt("auto", "Auto"), opt("1", "×1"), opt("2", "×2"), opt("3", "×3"), opt("4", "×4") }),
-        item("scaling", "Scaling", { opt("sharp", "Sharp"), opt("smooth", "Smooth"), opt("nearest", "Nearest"), opt("integer", "Integer") }),
-        item("controller", "Controller", { opt("modern", "Modern (twin stick)"), opt("classic", "Classic (the game's own)") }),
-        item("driveby", "Drive-bys", { opt("game", "As the game (London 1961's missions)"), opt("always", "Always (in a network game, the host's choice)") }),
-        item("retry", "Failed missions", { opt("0", "As the game (a failed job is lost)"), opt("1", "Offered again (the phone rings, the car is back)") }),
+        item("Graphics", "resolution", "Screen size", res),
+        item("Graphics", "fullscreen", "Fullscreen", { opt("1", "Yes"), opt("0", "No") }),
+        item("Graphics", "scaling", "Scaling", { opt("sharp", "Sharp"), opt("smooth", "Smooth"), opt("nearest", "Nearest"), opt("integer", "Integer") }),
+        item("Graphics", "renderer", "Renderer", { opt("gpu", "GPU (any size at full speed)"), opt("software", "Software (as released)") }),
+        item("Graphics", "filter", "Textures", { opt("1", "Bilinear"), opt("0", "Sharp") }),
+        item("Graphics", "smooth", "Motion", { opt("1", "Smooth (the display's rate)"), opt("0", "As released (23 fps)") }),
+        item("Graphics", "hud", "HUD size", { opt("auto", "Auto"), opt("1", "×1"), opt("2", "×2"), opt("3", "×3"), opt("4", "×4") }),
+        item("Gameplay", "controller", "Controller", { opt("modern", "Modern (twin stick)"), opt("classic", "Classic (tank)") }),
+        item("Gameplay", "driveby", "Drive-bys", { opt("game", "Like in the game"), opt("always", "Always (online, the host's choice)") }),
+        item("Gameplay", "retry", "Retry missions", { opt("1", "Yes (the phone rings again, the car is back)"), opt("0", "No (a failed one is lost)") }),
     };
 }
 
