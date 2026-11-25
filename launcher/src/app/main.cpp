@@ -20,6 +20,16 @@
 // Wayland shows no icon. This launcher's, and its icon, in the user's own
 // data folder; written again if the launcher has moved.
 static void install_desktop_entry() {
+#ifdef _WIN32
+    // Windows: a Start menu shortcut to this launcher (Qt makes it a .lnk)
+    QString menu = QDir::fromNativeSeparators(qEnvironmentVariable("APPDATA")) + "/Microsoft/Windows/Start Menu/Programs";
+    if (!qEnvironmentVariableIsEmpty("APPDATA") && QDir().mkpath(menu)) {
+        QString lnk = menu + "/joyride.lnk";
+        QFile::remove(lnk);
+        QFile::link(QCoreApplication::applicationFilePath(), lnk);
+    }
+    return;
+#endif
     QString data = qEnvironmentVariable("XDG_DATA_HOME");
     if (data.isEmpty()) data = QDir::homePath() + "/.local/share";
     QString exe = qEnvironmentVariable("APPIMAGE");        // an AppImage: the file itself, not its mount
@@ -57,8 +67,8 @@ int main(int argc, char **argv) {
         if (qEnvironmentVariableIsEmpty("QT_PLUGIN_PATH")) qputenv("QT_PLUGIN_PATH", appdir + "/usr/plugins");
         if (qEnvironmentVariableIsEmpty("QML_IMPORT_PATH")) qputenv("QML_IMPORT_PATH", appdir + "/usr/qml");
     }
-    if (qEnvironmentVariableIsEmpty("JOYRIDE_LAUNCHER_SHOT")) install_desktop_entry();
     QGuiApplication app(argc, argv);
+    if (qEnvironmentVariableIsEmpty("JOYRIDE_LAUNCHER_SHOT")) install_desktop_entry();   // (Windows: needs the app's path)
     app.setApplicationName("joyride");
     app.setOrganizationName("joyride");
     app.setApplicationVersion(JOYRIDE_VERSION);

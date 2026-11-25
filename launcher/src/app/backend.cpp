@@ -27,19 +27,38 @@ Backend::Backend(QObject *parent) : QObject(parent) {}
 
 QString Backend::homeDir() const { return QDir::homePath(); }
 
-// joyride's source: JOYRIDE_SOURCE_DIR; from an AppImage, a copy of the
-// one it carries in joyride's data folder (the AppImage is read-only, and
-// the build happens there); else the checkout this launcher was built from
+// joyride's source: JOYRIDE_SOURCE_DIR; from a release (the AppImage, the
+// Windows bundle), a copy of the one it carries in joyride's data folder
+// (the AppImage is read-only, and the build happens there); else the
+// checkout this launcher was built from
 QString Backend::sourceDir() const {
     QString e = qEnvironmentVariable("JOYRIDE_SOURCE_DIR");
     if (!e.isEmpty()) return e;
     if (!bundledSource().isEmpty()) return q(jl::dataRoot()) + "/src";
     return QString(JOYRIDE_SOURCE_DIR);
 }
-QString Backend::bundledSource() const {
+// A release's layout:
+//   the AppImage ($APPDIR/usr)       the Windows bundle (the launcher's folder)
+//   share/joyride/src                src/
+//   lib/joyride (the runtime)        runtime/
+//   lib/joyride/python/bin/python3   python/python.exe
+//   lib/joyride/cc/joyride-cc        runtime/cc/bin/gcc.exe
+static QString releaseDir() {
+#ifdef _WIN32
+    return QCoreApplication::applicationDirPath();
+#else
     QString app = qEnvironmentVariable("APPDIR");
-    QString b = app + "/usr/share/joyride/src";
-    return !app.isEmpty() && QFileInfo::exists(b + "/tools/lift.sh") ? b : QString();
+    return app.isEmpty() ? QString() : app + "/usr";
+#endif
+}
+QString Backend::bundledSource() const {
+    QString r = releaseDir();
+#ifdef _WIN32
+    QString b = r + "/src";
+#else
+    QString b = r + "/share/joyride/src";
+#endif
+    return !r.isEmpty() && QFileInfo::exists(b + "/tools/lift.py") ? b : QString();
 }
 // the AppImage's source copied out when it is not there or not this
 // version's; what was made in it (gen/, build/, .venv/) stays
@@ -63,29 +82,59 @@ bool Backend::syncSource() {
     return true;
 }
 
-// what the steps and the game run with: from an AppImage, its libraries,
-// and its Python and compiler for the tools
-QString Backend::appUsr() const {
-    QString b = bundledSource();
-    return b.isEmpty() ? QString() : qEnvironmentVariable("APPDIR") + "/usr";
+// what a release's game is linked to (its prebuilt runtime), and the
+// Python and compiler its tools run with; empty when not a release
+QString Backend::runtimeDir() const {
+    if (bundledSource().isEmpty()) return QString();
+#ifdef _WIN32
+    return releaseDir() + "/runtime";
+#else
+    return releaseDir() + "/lib/joyride";
+#endif
 }
+QString Backend::compiler() const {
+#ifdef _WIN32
+    return runtimeDir() + "/cc/bin/gcc.exe";
+#else
+    return runtimeDir() + "/cc/joyride-cc";
+#endif
+}
+QString Backend::python() const {
+    if (bundledSource().isEmpty()) {
+#ifdef _WIN32
+        return sourceDir() + "/.venv/Scripts/python.exe";
+#else
+        return sourceDir() + "/.venv/bin/python";
+#endif
+    }
+#ifdef _WIN32
+    return releaseDir() + "/python/python.exe";
+#else
+    return runtimeDir() + "/python/bin/python3";
+#endif
+}
+// what the steps and the game run with: the AppImage's libraries (on
+// Windows the game's are beside it), the release's Python and compiler
 QProcessEnvironment Backend::toolEnv() const {
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    QString usr = appUsr();
-    if (usr.isEmpty()) return env;
+    if (runtimeDir().isEmpty()) return env;
+#ifndef _WIN32
     QString ld = env.value("LD_LIBRARY_PATH");
-    env.insert("LD_LIBRARY_PATH", usr + "/lib" + (ld.isEmpty() ? "" : ":" + ld));
+    env.insert("LD_LIBRARY_PATH", releaseDir() + "/lib" + (ld.isEmpty() ? "" : ":" + ld));
+#endif
     env.insert("JOYRIDE_PYTHON", python());
-    env.insert("CC", usr + "/lib/joyride/cc/joyride-cc");
+    env.insert("CC", compiler());
     env.remove("PYTHONHOME"), env.remove("PYTHONPATH");
     return env;
 }
-QString Backend::python() const {
-    QString usr = appUsr();
-    return usr.isEmpty() ? sourceDir() + "/.venv/bin/python" : usr + "/lib/joyride/python/bin/python3";
-}
 
-QString Backend::joyrideBinary() const { return sourceDir() + "/build/joyride"; }
+QString Backend::joyrideBinary() const {
+#ifdef _WIN32
+    return sourceDir() + "/build/joyride.exe";
+#else
+    return sourceDir() + "/build/joyride";
+#endif
+}
 bool Backend::joyrideReady() const { return QFileInfo(joyrideBinary()).isExecutable(); }
 QString Backend::cfgPath() const { return q(jl::dataRoot()) + "/joyride.cfg"; }
 
@@ -189,7 +238,7 @@ void Backend::prepare() {
     if (busy()) return;
     QString src = sourceDir(), gta = q(jl::playDir("gta1"));
     if (gta.isEmpty()) { error_ = "Install Grand Theft Auto first"; emit busyChanged(); return; }
-    bool app = !appUsr().isEmpty();             // an AppImage: everything needed is in it
+    bool app = !runtimeDir().isEmpty();         // a release: everything needed is in it
     if (!app) {
         // what the build needs on this computer (the libraries' development
         // files are CMake's to find: it says which in the log)
@@ -209,9 +258,8 @@ void Backend::prepare() {
     steps_.clear();
     if (app) {
         // the game made from GTA's own executable, linked to the runtime the AppImage carries
-        QString rt = appUsr() + "/lib/joyride";
-        steps_ << qMakePair(python(), QStringList{ "tools/lift.py", gta + "/WINO/Grand Theft Auto.exe", "--cc", rt + "/cc/joyride-cc" });
-        steps_ << qMakePair(python(), QStringList{ "tools/link_game.py", rt });
+        steps_ << qMakePair(python(), QStringList{ "tools/lift.py", gta + "/WINO/Grand Theft Auto.exe", "--cc", compiler() });
+        steps_ << qMakePair(python(), QStringList{ "tools/link_game.py", runtimeDir() });
     } else {
         if (!QFileInfo::exists(src + "/external/pcrecomp/tools/__main__.py"))
             steps_ << qMakePair(QString("git"), QStringList{ "submodule", "update", "--init", "--recursive" });

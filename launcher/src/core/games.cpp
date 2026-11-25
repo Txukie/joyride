@@ -18,6 +18,11 @@
 //   * London 1969's music: CD audio tracks 2 to 16, as Music/TrackN.wav.
 #include "games.h"
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
 #include "archive.h"
 #include "bincue.h"
 #include "is5cab.h"
@@ -54,10 +59,38 @@ const GameInfo *game(const std::string &id) {
     return nullptr;
 }
 
+// joyride's data: XDG_DATA_HOME/joyride; on Windows %LOCALAPPDATA%\joyride
+// (where the game itself keeps it, src/host/main.c)
 std::string dataRoot() {
     const char *xdg = std::getenv("XDG_DATA_HOME"), *home = std::getenv("HOME");
     if (xdg && *xdg) return std::string(xdg) + "/joyride";
+#ifdef _WIN32
+    if (const char *local = std::getenv("LOCALAPPDATA"); local && *local) return std::string(local) + "/joyride";
+#endif
     return std::string(home ? home : ".") + "/.local/share/joyride";
+}
+
+// A file of one game folder in another's: a symbolic link; on Windows (where
+// those want Developer Mode) a hard link, or a copy on another drive
+static void linkFile(const fs::path &from, const fs::path &to, std::error_code &ec) {
+#ifdef _WIN32
+    fs::create_hard_link(from, to, ec);
+    if (ec) { ec.clear(); fs::copy_file(from, to, fs::copy_options::overwrite_existing, ec); }
+#else
+    fs::create_symlink(from, to, ec);
+#endif
+}
+static void linkDir(const fs::path &from, const fs::path &to, std::error_code &ec) {
+#ifdef _WIN32
+    fs::create_directories(to, ec);
+    for (auto &e : fs::recursive_directory_iterator(from, ec)) {
+        fs::path t = to / fs::relative(e.path(), from, ec);
+        if (e.is_directory()) fs::create_directories(t, ec);
+        else linkFile(e.path(), t, ec);
+    }
+#else
+    fs::create_directory_symlink(from, to, ec);
+#endif
 }
 std::string gameDir(const std::string &id) { return dataRoot() + "/games/" + id; }
 
@@ -170,17 +203,32 @@ std::string playDir(const std::string &id) {
 bool installed(const std::string &id) { return !playDir(id).empty(); }
 
 std::vector<std::string> steamGtaInstalls() {
+    std::vector<std::string> roots, libs, out;
+#ifdef _WIN32
+    // Steam's folder: the registry has it (HKCU\Software\Valve\Steam, SteamPath), else the usual one
+    char buf[1024];
+    DWORD n = sizeof buf;
+    if (RegGetValueA(HKEY_CURRENT_USER, "Software\\Valve\\Steam", "SteamPath", RRF_RT_REG_SZ, nullptr, buf, &n) == ERROR_SUCCESS)
+        roots.push_back(buf);
+    for (const char *pf : { "ProgramFiles(x86)", "ProgramFiles" })
+        if (const char *p = std::getenv(pf)) roots.push_back(std::string(p) + "/Steam");
+#else
     const char *home = std::getenv("HOME");
-    std::vector<std::string> libs, out;
-    for (const char *base : { "/.local/share/Steam", "/.steam/steam", "/.var/app/com.valvesoftware.Steam/.local/share/Steam" }) {
-        std::string root = std::string(home ? home : "") + base;
+    for (const char *base : { "/.local/share/Steam", "/.steam/steam", "/.var/app/com.valvesoftware.Steam/.local/share/Steam" })
+        roots.push_back(std::string(home ? home : "") + base);
+#endif
+    for (const std::string &root : roots) {
         libs.push_back(root);
         std::ifstream vdf(root + "/steamapps/libraryfolders.vdf");
         std::string line;
         std::regex path(R"re("path"\s+"([^"]+)")re");
         std::smatch m;
         while (std::getline(vdf, line))
-            if (std::regex_search(line, m, path)) libs.push_back(m[1].str());
+            if (std::regex_search(line, m, path)) {
+                std::string l = m[1].str();                 // Windows: "D:\\SteamLibrary", backslashes doubled
+                for (size_t i; (i = l.find("\\\\")) != std::string::npos; ) l.erase(i, 1);
+                libs.push_back(l);
+            }
     }
     for (auto &l : libs) {
         fs::path p = fs::path(l) / "steamapps" / "common" / "Grand Theft Auto";
@@ -497,15 +545,15 @@ bool assembleLondon(const std::string &id, std::string &err, const Log &log) {
     // linked folder is the real one's parent (GTA's own install)
     fs::create_directories(play / "WINO", ec);
     for (auto &e : fs::directory_iterator(find(gta, "WINO"), ec))
-        if (!e.is_directory()) fs::create_symlink(e.path(), play / "WINO" / e.path().filename(), ec);
+        if (!e.is_directory()) linkFile(e.path(), play / "WINO" / e.path().filename(), ec);
     if (ec) { err = "cannot link GTA's WINO: " + ec.message(); return false; }
     fs::path gdata = find(gta, "GTADATA");
     for (auto &e : fs::directory_iterator(gdata, ec)) {
         if (e.is_directory()) {                          // AUDIO: a folder of links
             fs::create_directories(data / e.path().filename(), ec);
-            for (auto &f : fs::directory_iterator(e.path(), ec)) fs::create_symlink(f.path(), data / e.path().filename() / f.path().filename(), ec);
+            for (auto &f : fs::directory_iterator(e.path(), ec)) linkFile(f.path(), data / e.path().filename() / f.path().filename(), ec);
         } else {
-            fs::create_symlink(e.path(), data / e.path().filename(), ec);
+            linkFile(e.path(), data / e.path().filename(), ec);
         }
     }
     // London 1969: the disc's UK folder, then what its setup installs
@@ -522,11 +570,15 @@ bool assembleLondon(const std::string &id, std::string &err, const Log &log) {
         for (int n : { 2, 3 }) {
             fs::path t = data / ("STYLE00" + std::to_string(n) + "." + ext);
             fs::remove(t, ec);
+#ifdef _WIN32
+            linkFile(s, t, ec);
+#else
             fs::create_symlink(s.filename(), t, ec);
+#endif
         }
     }
     // music: London 1969's
-    fs::create_directory_symlink(l69 / "Music", play / "Music", ec);
+    linkDir(l69 / "Music", play / "Music", ec);
     if (!isGtaInstall(play)) { err = "the game folder is incomplete"; return false; }
     log("Ready: " + play.string());
     return true;

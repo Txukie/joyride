@@ -74,7 +74,8 @@ private:
     QString sourceDir() const;                                      // joyride's source (build/, tools/)
     QString bundledSource() const;                                  // the AppImage's, or empty
     bool syncSource();                                              // copied out of the AppImage
-    QString appUsr() const;                                         // the AppImage's usr/, or empty
+    QString runtimeDir() const;                                     // a release's prebuilt runtime, or empty
+    QString compiler() const;                                       // its C compiler
     QProcessEnvironment toolEnv() const;                            // its libraries, Python and compiler
     QString python() const;                                         // the tools' Python
     QString joyrideBinary() const;
