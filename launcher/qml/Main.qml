@@ -61,11 +61,26 @@ ApplicationWindow {
         anchors.margins: 32
         initialItem: homePage
         focus: true
-        Keys.onEscapePressed: {                  // B: back a page, or on the first page out of the launcher
+        Keys.onEscapePressed: {                  // B: back a page; on the first page, twice to close the launcher
             if (backend.busy) return
             if (depth > 1) pop()
-            else Qt.quit()
+            else if (quitHint.visible) Qt.quit()
+            else quitHint.show()
         }
+    }
+
+    // "Press B again": a press on the first page only asks
+    Rectangle {
+        id: quitHint
+        function show() { visible = true; quitTimer.restart() }
+        visible: false
+        z: 20
+        anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: 110 }
+        width: quitText.implicitWidth + 48; height: 52; radius: 26
+        color: "#e6262a30"; border.color: win.accent; border.width: 2
+        Text { id: quitText; anchors.centerIn: parent; color: win.text; font.pixelSize: 20
+               text: pad.connected ? "Press B again to close joyride" : "Press Esc again to close joyride" }
+        Timer { id: quitTimer; interval: 2000; onTriggered: quitHint.visible = false }
     }
 
     Connections {
