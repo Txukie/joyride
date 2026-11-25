@@ -43,7 +43,9 @@
  * (timers, what each waits on; 0x676660, 24 bytes each): after the first
  * mission its main loop is another one, further on. These are kept as they
  * are once the checkpoint has settled (5 s after the level's start or a
- * pass: the script back to waiting) and put back on loading.
+ * pass, and again while the script's opening goes on: refresh()), with
+ * each KICKSTART's list of the processes it started (version 5: what
+ * KILL_SIDE_PROC ends when a job is taken), and put back on loading.
  * Put back, the counters and phones let the script's own loops offer the
  * next jobs (a failed one is offered again: it was not passed).
  *
@@ -84,7 +86,7 @@
 #include "joyride_hle.h"
 
 #define MAGIC "JRSV"
-#define VERSION 4u               /* 1: no counters, 2: no phones, 3: no processes (all still read) */
+#define VERSION 5u               /* 1: no counters, 2: no phones, 3: no processes, 4: no KICKSTART lists (all still read) */
 #define MAXPHONE 512
 #define MAXCOUNT 256
 
@@ -95,6 +97,8 @@
 #define CMDS 0x676660u           /* the script's commands, 24 bytes each */
 #define CMDLINES 0x693B30u       /* script line -> command, int16 */
 #define MAXCMD 8192u
+#define CMD_KICKSTART 89u        /* its command's +0x10: an object of its own, beyond the lines' */
+#define MAXKICK 256u
 
 /* the script's processes, 32 of them: each array by process (0x448EDD,
  * KICKSTART, fills them; 0x44919D, KILL_PROCESS, empties them) */
@@ -136,6 +140,13 @@ static uint8_t g_pgone[MAXPHONE];
 static uint8_t g_cproc[PROCBYTES];
 static uint8_t *g_ccmd;
 static uint32_t g_ncmd;
+/* each KICKSTART's object (no line names it): +0x10.. the processes it
+ * started, which KILL_SIDE_PROC (0x4493C1) ends. Kept with the commands
+ * (after them, 32 bytes each), or a process put back is one nothing ends:
+ * the pointer loop between jobs went on pointing at the phones */
+static uint32_t g_kcmd[MAXKICK], g_nkick;   /* the KICKSTART commands; their objects are given as they first run */
+#define CMDBYTES ((size_t)g_ncmd * 24u + (size_t)g_nkick * 32u)
+static int g_pend_nokick;        /* the save has none (version 4): the start-up's stay */
 /* a save's processes and commands, waiting for the level's start-up to end
  * (its first processes are kicked off over its first seconds) */
 static uint8_t *g_pend_proc, *g_pend_cmd;
@@ -236,17 +247,38 @@ static uint32_t count_cmds(void) {
 }
 
 /* the processes and commands: taken, put back */
+/* a KICKSTART's object: given the first time it runs (0x448FEF: the first
+ * free one down from 1399, type 0x64 then), 0 before; the processes it
+ * started at +0x10, +0x14, +0x18 and +4 (-1 none) */
+static uint32_t kick_obj(uint32_t cmd) {
+    int32_t o = (int32_t)MEM32(CMDS + cmd * 24u + 0x10);
+    return o > 0 && (uint32_t)o < MAXOBJ ? OBJS + (uint32_t)o * 32u : 0;
+}
 static void take_script(uint8_t *proc, uint8_t *cmds) {
     size_t o = 0;
     for (size_t k = 0; k < NPROCARR; k++)
         for (uint32_t i = 0; i < 32u * k_proc[k].size; i++) proc[o++] = MEM8(k_proc[k].va + i);
     for (uint32_t i = 0; i < g_ncmd * 24u; i++) cmds[i] = MEM8(CMDS + i);
+    for (uint32_t k = 0; k < g_nkick; k++) {
+        uint32_t a = kick_obj(g_kcmd[k]);
+        for (uint32_t i = 0; i < 32; i++) cmds[g_ncmd * 24u + k * 32u + i] = a ? MEM8(a + i) : 0xFF;
+    }
 }
 static void put_script(const uint8_t *proc, const uint8_t *cmds) {
     size_t o = 0;
     for (size_t k = 0; k < NPROCARR; k++)
         for (uint32_t i = 0; i < 32u * k_proc[k].size; i++) MEM8(k_proc[k].va + i) = proc[o++];
     for (uint32_t i = 0; i < g_ncmd * 24u; i++) MEM8(CMDS + i) = cmds[i];
+    for (uint32_t k = 0; k < g_nkick; k++) {             /* the commands put back: their objects then */
+        uint32_t a = kick_obj(g_kcmd[k]);
+        if (a) for (uint32_t i = 0; i < 32; i++) MEM8(a + i) = cmds[g_ncmd * 24u + k * 32u + i];
+    }
+}
+static void find_kicks(void) {
+    g_nkick = 0;
+    for (uint32_t i = 0; i < g_ncmd; i++) {
+        if (MEM16(CMDS + i * 24u) == CMD_KICKSTART && g_nkick < MAXKICK) g_kcmd[g_nkick++] = i;
+    }
 }
 
 static void city_free(city_t *c) {
@@ -255,14 +287,14 @@ static void city_free(city_t *c) {
 }
 static int city_alloc(city_t *c) {
     city_free(c);
-    c->cmds = malloc((size_t)(g_ncmd ? g_ncmd : 1) * 24u);
+    c->cmds = malloc(CMDBYTES ? CMDBYTES : 1);
     c->objs = malloc((size_t)(g_nobj ? g_nobj : 1) * 32u);
     c->cars = calloc(g_nobj ? g_nobj : 1, sizeof *c->cars);
     return c->cmds && c->objs && c->cars;
 }
 static void city_copy(city_t *to, const city_t *from) {
     memcpy(to->proc, from->proc, PROCBYTES), memcpy(to->trig, from->trig, TRIGBYTES);
-    memcpy(to->cmds, from->cmds, (size_t)g_ncmd * 24u), memcpy(to->objs, from->objs, (size_t)g_nobj * 32u);
+    memcpy(to->cmds, from->cmds, CMDBYTES), memcpy(to->objs, from->objs, (size_t)g_nobj * 32u);
     memcpy(to->cars, from->cars, (size_t)g_nobj * sizeof *to->cars);
 }
 
@@ -296,7 +328,19 @@ static void city_take(city_t *c) {
     }
 }
 
+/* the script's running processes (which of the 32), for "still" */
+static uint32_t proc_sig(void) {
+    uint32_t sig = 2166136261u;
+    for (uint32_t i = 0; i < 32; i++) sig = (sig ^ MEM16(0x6761C0 + 2 * i)) * 16777619u;
+    return sig;
+}
+static uint32_t g_snap_sig;          /* the processes running then */
+static uint64_t g_cp_t;              /* when (ms) */
+#define REFRESH_MS 30000             /* the script's opening, or a pass's tidying up, over by then */
+static int g_failed;                 /* a mission failed since: the checkpoint is the one before it */
+
 static void checkpoint(int settle) {
+    g_snap_sig = proc_sig(), g_failed = 0, g_cp_t = SDL_GetTicks();
     for (int i = 0; i < g_n; i++) g_check[i].a = (int32_t)MEM32(g_obj[i] + 4), g_check[i].b = (int32_t)MEM32(g_obj[i] + 8);
     for (int i = 0; i < g_np; i++) g_pgone[i] = (uint8_t)phone_gone(i);
     if (g_ccmd) take_script(g_cproc, g_ccmd);
@@ -304,6 +348,21 @@ static void checkpoint(int settle) {
     if (joyride_cfg.retry) city_take(&g_ccity);
     g_started = 0;
     if (settle) g_settle = SDL_GetTicks() + SETTLE_MS, g_settle_base = 0;
+}
+
+/* the script at the checkpoint taken again, the counters and phones as
+ * they were: the checkpoint's time (5 s after a level's start or a pass)
+ * can be in the middle of the script's opening (its briefing, then the loop
+ * that points at the phones started), and a city put back there runs it
+ * again, a second loop pointing at the phones through the next job. Taken
+ * once the processes running have kept still, and only while nothing has
+ * happened since (no mission under way or failed, no counter or phone
+ * changed) and soon after the checkpoint: the opening also disables
+ * triggers, as a frenzy starting does, and a frenzy changes no counter */
+static void refresh(void) {
+    if (g_ccmd) take_script(g_cproc, g_ccmd);
+    if (joyride_cfg.retry) city_take(&g_ccity);
+    g_snap_sig = proc_sig();
 }
 
 /* only the baseline: the city as a failure left it */
@@ -352,7 +411,9 @@ static int write_save(char *msg, size_t n, const char *what) {
     int ok = f && fwrite(&s, sizeof s, 1, f) == 1 && fwrite(g_check, sizeof *g_check, (size_t)g_n, f) == (size_t)g_n &&
              fwrite(&ngone, 4, 1, f) == 1 && fwrite(gone, 4, ngone, f) == ngone &&
              fwrite(&ncmd, 4, 1, f) == 1 && (!ncmd || (fwrite(g_cproc, 1, PROCBYTES, f) == PROCBYTES &&
-                                                       fwrite(g_ccmd, 24, ncmd, f) == ncmd));
+                                                       fwrite(g_ccmd, 24, ncmd, f) == ncmd &&
+                                                       fwrite(&g_nkick, 4, 1, f) == 1 &&
+                                                       fwrite(g_ccmd + ncmd * 24u, 32, g_nkick, f) == g_nkick));
     if (f && fclose(f)) ok = 0;
     if (!ok || rename(tmp, path)) {
         snprintf(msg, n, "Save failed: %s", strerror(errno));
@@ -555,8 +616,11 @@ static void load(void) {
     int procs = 0;
     uint32_t ncmd = 0;
     if (s.version >= 4 && fread(&ncmd, 4, 1, f) == 1 && ncmd && ncmd == count_cmds()) {
-        uint8_t *proc = malloc(PROCBYTES), *cmds = malloc((size_t)ncmd * 24u);
+        uint8_t *proc = malloc(PROCBYTES), *cmds = malloc(CMDBYTES);
         if (proc && cmds && fread(proc, 1, PROCBYTES, f) == PROCBYTES && fread(cmds, 24, ncmd, f) == ncmd) {
+            uint32_t nkick = 0;
+            g_pend_nokick = !(s.version >= 5 && fread(&nkick, 4, 1, f) == 1 && nkick == g_nkick &&
+                              fread(cmds + ncmd * 24u, 32, nkick, f) == nkick);
             g_pend_proc = proc, g_pend_cmd = cmds, proc = cmds = NULL;   /* put back once the start-up is over */
             procs = 1;
         }
@@ -575,8 +639,9 @@ void joyride_savegame_step(void) {
     if (g_menus) {                                        /* the first step of a level */
         g_menus = 0;
         g_ncmd = count_cmds();
+        find_kicks();
         free(g_ccmd);
-        g_ccmd = g_ncmd ? malloc((size_t)g_ncmd * 24u) : NULL;
+        g_ccmd = g_ncmd ? malloc(CMDBYTES) : NULL;
         free(g_pend_proc), free(g_pend_cmd);
         g_pend_proc = g_pend_cmd = NULL;
         g_level_t0 = g_stable_t0 = SDL_GetTicks(), g_stable_sig = 0;
@@ -601,12 +666,17 @@ void joyride_savegame_step(void) {
         return;
     }
     if (joyride_net_driveby() >= 0 || (int32_t)MEM32(0x6B3E28) <= 0) return;
+    uint32_t sig = proc_sig();
+    uint64_t now = SDL_GetTicks();
+    if (sig != g_stable_sig) g_stable_sig = sig, g_stable_t0 = now;
+    int still = now - g_stable_t0 >= STARTUP_STILL_MS;
     if (g_pend_proc) {                                    /* the save's processes, once the start-up is over */
-        uint32_t sig = 2166136261u;
-        for (uint32_t i = 0; i < 32; i++) sig = (sig ^ MEM16(0x6761C0 + 2 * i)) * 16777619u;
-        uint64_t now = SDL_GetTicks();
-        if (sig != g_stable_sig) g_stable_sig = sig, g_stable_t0 = now;
         if (now - g_level_t0 < STARTUP_MIN_MS || now - g_stable_t0 < STARTUP_STILL_MS) return;
+        if (g_pend_nokick)                                /* the start-up's lists, as they are */
+            for (uint32_t k = 0; k < g_nkick; k++) {
+                uint32_t a = kick_obj(g_kcmd[k]);
+                for (uint32_t i = 0; i < 32; i++) g_pend_cmd[g_ncmd * 24u + k * 32u + i] = a ? MEM8(a + i) : 0xFF;
+            }
         put_script(g_pend_proc, g_pend_cmd);
         free(g_pend_proc), free(g_pend_cmd);
         g_pend_proc = g_pend_cmd = NULL;
@@ -615,21 +685,17 @@ void joyride_savegame_step(void) {
         return;
     }
     int fail = fail_shown();
-    if (g_retry && !fail && !g_fail_on && joyride_cfg.retry && g_rcity.objs) {   /* the failed mission, back */
-        uint32_t sig = 2166136261u;
-        for (uint32_t i = 0; i < 32; i++) sig = (sig ^ MEM16(0x6761C0 + 2 * i)) * 16777619u;
-        uint64_t now = SDL_GetTicks();
-        if (sig != g_stable_sig) g_stable_sig = sig, g_stable_t0 = now;
-        if (now - g_fail_t >= RETRY_MIN_MS && now - g_stable_t0 >= STARTUP_STILL_MS) {
-            retry_now();
-            return;
-        }
+    if (g_retry && !fail && !g_fail_on && joyride_cfg.retry && g_rcity.objs &&
+        now - g_fail_t >= RETRY_MIN_MS && still) {        /* the failed mission, back */
+        retry_now();
+        return;
     }
     if (fail && !g_fail_on) {                             /* "MISSION FAILED!": what the mission was, kept */
         if (joyride_cfg.retry && g_ccity.objs) {
             city_copy(&g_rcity, &g_ccity);
-            g_retry = 1, g_fail_t = SDL_GetTicks(), g_stable_sig = 0;
+            g_retry = 1, g_fail_t = now;
         }
+        g_failed = 1;
         g_started = 0;                                    /* nothing under way; the checkpoint stays */
         baseline();
         g_settle = SDL_GetTicks() + FAIL_SETTLE_MS, g_settle_base = 1;
@@ -650,6 +716,9 @@ void joyride_savegame_step(void) {
         g_settle = 0;
         return;
     }
+    if (!passed && !changed && !g_started && !g_failed && !g_settle && still && sig != g_snap_sig &&
+        now - g_cp_t < REFRESH_MS)
+        refresh();                                        /* the script still since the checkpoint */
     if (passed) {                                         /* a mission passed: the new checkpoint */
         checkpoint(1);
         g_retry = 0;
