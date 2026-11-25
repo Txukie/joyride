@@ -173,6 +173,7 @@ void joyride_debug_report(void) {
     fprintf(f, "player %u: state %u id %u; weapons", MEM32(0x74F83C), MEM32(r + 0xA4), MEM32(r + 0xA8) & 0xFFFF);
     for (int w = 0; w < 5; w++) fprintf(f, " %u", MEM8(r + 0x13F + w));
     fprintf(f, " (current %u)\n\n", MEM32(r + 0x148));
+    joyride_savegame_report(f);
 
     uint32_t n = g_ns < NSTEP ? g_ns : NSTEP;
     uint64_t t0 = n ? g_steps[(g_ns - n) % NSTEP].ns : 0;

@@ -75,6 +75,7 @@
  * Not in a network game: everyone must play the same game.
  */
 #include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -185,6 +186,22 @@ static uint64_t g_fail_t;        /* when it failed (ms) */
 #define RETRY_MIN_MS 5000        /* not before, after the failure */
 static int g_fail_on;            /* the failure message up, the last step */
 static char g_failtxt[2][48];
+
+/* the log: what saving and retrying did, printed and kept for the L4 report */
+#define NLOG 40
+static char g_log[NLOG][200];
+static unsigned g_nlog;
+static void slog(const char *fmt, ...) {
+    char line[180];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof line, fmt, ap);
+    va_end(ap);
+    fprintf(stderr, "[save] %s", line);
+    size_t n = strlen(line);
+    if (n && line[n - 1] == '\n') line[n - 1] = 0;       /* one entry a line, however long */
+    snprintf(g_log[g_nlog++ % NLOG], sizeof g_log[0], "%8.1f s  %s", SDL_GetTicks() / 1000.0, line);
+}
 
 static uint32_t rec(void) { return 0x74F160u + MEM32(0x74F83C) * 0x1BCu; }
 
@@ -424,7 +441,7 @@ static int write_save(char *msg, size_t n, const char *what) {
     for (int i = 0; i < g_n; i++)
         if ((int32_t)MEM32(g_obj[i]) == T_MISSIONS) left = left < 0 ? g_check[i].a : left + g_check[i].a;
     snprintf(msg, n, "Saved: %d points", s.score);
-    fprintf(stderr, "[save] %s %s: %s, section %d, %d points x%d, %d counters (missions left %d), %u phones taken\n", what,
+    slog("%s %s: %s, section %d, %d points x%d, %d counters (missions left %d), %u phones taken\n", what,
             path, s.name, s.section, s.score, s.multiplier, g_n, left, ngone);
     return 1;
 }
@@ -586,7 +603,7 @@ static void retry_now(void) {
     for (int k = 0; k < nheld; k++) MEM8(car_at(held[k]) + 0x139) = 0;
     g_retry = 0;
     checkpoint(1);
-    fprintf(stderr, "[save] retry: the city before the mission (%d cars and %d people of the mission taken away, %d cars made again, %d of them left to who is in them)\n",
+    slog("retry: the city before the mission (%d cars and %d people of the mission taken away, %d cars made again, %d of them left to who is in them)\n",
             cars, peds, made, kept);
 }
 
@@ -608,7 +625,7 @@ static void load(void) {
     guest_str(0x6B3E88, map, sizeof map);
     if (!ok || memcmp(s.magic, MAGIC, 4) || s.version < 1 || s.version > VERSION ||
         s.section != (int32_t)MEM32(0x6B3E28) || strncmp(s.map, map, sizeof map)) {
-        fprintf(stderr, "[save] %s: not this level's, left alone\n", path);
+        slog("%s: not this level's, left alone\n", path);
         fclose(f);
         return;
     }
@@ -662,7 +679,7 @@ static void load(void) {
         free(proc), free(cmds);
     }
     fclose(f);
-    fprintf(stderr, "[save] loaded %s: %d points x%d, %d counters, %d phones taken, processes %s\n", path, s.score,
+    slog("loaded %s: %d points x%d, %d counters, %d phones taken, processes %s\n", path, s.score,
             s.multiplier, put, taken, procs ? "to put back after the start-up" : "not in the save");
 }
 
@@ -716,7 +733,7 @@ void joyride_savegame_step(void) {
         free(g_pend_proc), free(g_pend_cmd);
         g_pend_proc = g_pend_cmd = NULL;
         checkpoint(1);
-        fprintf(stderr, "[save] processes put back\n");
+        slog("processes put back\n");
         return;
     }
     int fail = fail_shown();
@@ -734,7 +751,7 @@ void joyride_savegame_step(void) {
         g_started = 0;                                    /* nothing under way; the checkpoint stays */
         baseline();
         g_settle = SDL_GetTicks() + FAIL_SETTLE_MS, g_settle_base = 1;
-        fprintf(stderr, "[save] a mission failed%s\n", g_retry ? ": it is put back once the script has tidied up" : "");
+        slog("a mission failed%s\n", g_retry ? ": it is put back once the script has tidied up" : "");
     }
     g_fail_on = fail;
     int passed = 0, changed = 0;
@@ -743,9 +760,10 @@ void joyride_savegame_step(void) {
         if (a != g_base[i].a || b != g_base[i].b) changed = 1;
         if ((t == T_MISSIONS || t == T_SECRETS) && a < g_base[i].a) passed = 1;
     }
+    int took = 0;                                         /* a job's phone taken out: a mission starting */
     for (int i = 0; i < g_np; i++)
-        if (phone_gone(i) != g_bgone[i]) changed = 1;     /* a job's phone taken out: a mission starting */
-    if (g_settle && !g_started && SDL_GetTicks() >= g_settle) {   /* settled: the checkpoint as it is now */
+        if (phone_gone(i) != g_bgone[i]) changed = 1, took |= phone_gone(i);
+    if (g_settle && !g_started && SDL_GetTicks() >= g_settle && !took) {   /* settled: the checkpoint as it is now */
         if (g_settle_base) baseline();
         else checkpoint(0);
         g_settle = 0;
@@ -757,8 +775,9 @@ void joyride_savegame_step(void) {
     if (passed) {                                         /* a mission passed: the new checkpoint */
         checkpoint(1);
         g_retry = 0;
-        fprintf(stderr, "[save] a mission passed: checkpoint\n");
-    } else if (changed && !g_started && SDL_GetTicks() < g_settle) {
+        slog("a mission passed: checkpoint\n");
+    } else if (changed && !g_started && SDL_GetTicks() < g_settle && !took) {   /* (a phone taken is never the script's tidying: a
+                                                                             * job right after a pass started then) */
         if (g_settle_base) baseline();                    /* the failure's tidying up */
         else checkpoint(0);                               /* the script settling: still the checkpoint */
     } else if (changed && !g_started) {                   /* a mission starts: saved as it was */
@@ -767,4 +786,22 @@ void joyride_savegame_step(void) {
         char msg[64];
         write_save(msg, sizeof msg, "autosaved (a mission starts)");
     }
+}
+
+/* for the L4 report (debug.c): where saving and retrying stand, and what they did */
+void joyride_savegame_report(FILE *f) {
+    uint64_t now = SDL_GetTicks();
+    fprintf(f, "SAVING AND RETRY (now %.1f s)\n", now / 1000.0);
+    fprintf(f, "mission under way: %s; failed since the checkpoint: %d; retry waiting: %d (failed %.1f s ago); settling: %s%s\n",
+            g_started ? "yes" : "no", g_failed, g_retry, g_fail_t ? (now - g_fail_t) / 1000.0 : -1.0,
+            g_settle ? (g_settle_base ? "after a failure" : "after a checkpoint") : "no", g_pend_proc ? "; a save's processes to put back" : "");
+    fprintf(f, "checkpoint %.1f s ago; counters:", (now - g_cp_t) / 1000.0);
+    for (int i = 0; i < g_n; i++)
+        fprintf(f, " %d=%d/%d", g_check[i].line, (int32_t)MEM32(g_obj[i] + 4), g_check[i].a);
+    fprintf(f, " (line=now/checkpoint)\nphones taken:");
+    for (int i = 0; i < g_np; i++) if (phone_gone(i)) fprintf(f, " %d%s", g_pline[i], g_pgone[i] ? "" : "(not at the checkpoint)");
+    fprintf(f, "\n");
+    unsigned n = g_nlog < NLOG ? g_nlog : NLOG;
+    for (unsigned i = g_nlog - n; i != g_nlog; i++) fprintf(f, "  %s\n", g_log[i % NLOG]);
+    fprintf(f, "\n");
 }

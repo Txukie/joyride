@@ -80,6 +80,7 @@ int joyride_net_driveby(void);
 void joyride_savegame_init(const char *data_dir);
 void joyride_savegame_menus(void);              /* a frame of the menus was shown */
 void joyride_savegame_step(void);               /* each game step in play (pad.c) */
+void joyride_savegame_report(FILE *f);          /* the L4 report's part (debug.c) */
 int  joyride_savegame_can_save(void);           /* in play, a level of one's own (not a network game) */
 int  joyride_savegame_save(char *msg, size_t n);/* 1 saved; msg says what happened */
 int  joyride_savegame_mission_secs(void);      /* since the mission under way started, -1 none */
