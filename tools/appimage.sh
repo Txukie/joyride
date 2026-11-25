@@ -3,7 +3,7 @@
 # joyride from their own copy of GTA with nothing installed. Nothing of the
 # game is in it: joyride's runtime comes prebuilt, without the generated
 # code, which the launcher makes on the player's machine (tools/lift.sh)
-# and links to it (tools/link-game.sh) with the compiler carried here.
+# and links to it (tools/link_game.py) with the compiler carried here.
 #
 #   tools/appimage.sh [work folder]       (default build-appimage/)
 #
@@ -112,10 +112,19 @@ EOF
 
 echo "== libraries, Qt, the AppImage"
 libs=()
-for l in libSDL3.so libSDL3_ttf.so libavformat.so libavcodec.so libavutil.so; do   # by the name programs load them by
+linked=()
+for l in libSDL3_ttf.so libSDL3.so libavformat.so libavcodec.so libavutil.so; do   # by the name programs load them by
     soname="$(objdump -p "/usr/lib/$l" | sed -n 's/^ *SONAME *//p')"
     libs+=(-l "/usr/lib/$soname")
+    linked+=("\"../$soname\"")
 done
+# how tools/link_game.py links the game to the runtime here
+cat > "$J/link.json" <<EOF
+{ "exe": "joyride",
+  "cflags": [],
+  "libs": ["libjoyride_runtime.a", "libwin32hle.a", $(IFS=,; echo "${linked[*]}"), "-lm", "-lpthread", "-ldl"],
+  "ldflags": ["-Wl,-rpath-link,{rt}/..", "-Wl,--allow-shlib-undefined"] }
+EOF
 cd "$work"
 # Wayland's own plugins beside the platform one (xdg-shell, decorations, its GL)
 qtplugins="$(qmake6 -query QT_INSTALL_PLUGINS)"

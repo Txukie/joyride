@@ -209,15 +209,16 @@ void Backend::prepare() {
     steps_.clear();
     if (app) {
         // the game made from GTA's own executable, linked to the runtime the AppImage carries
-        steps_ << qMakePair(src + "/tools/lift.sh", QStringList{ gta + "/WINO/Grand Theft Auto.exe" });
-        steps_ << qMakePair(src + "/tools/link-game.sh", QStringList{ appUsr() });
+        QString rt = appUsr() + "/lib/joyride";
+        steps_ << qMakePair(python(), QStringList{ "tools/lift.py", gta + "/WINO/Grand Theft Auto.exe", "--cc", rt + "/cc/joyride-cc" });
+        steps_ << qMakePair(python(), QStringList{ "tools/link_game.py", rt });
     } else {
         if (!QFileInfo::exists(src + "/external/pcrecomp/tools/__main__.py"))
             steps_ << qMakePair(QString("git"), QStringList{ "submodule", "update", "--init", "--recursive" });
         if (!QFileInfo::exists(src + "/.venv/bin/python"))
             steps_ << qMakePair(QString("python3"), QStringList{ "-m", "venv", ".venv" });
         steps_ << qMakePair(src + "/.venv/bin/pip", QStringList{ "install", "-q", "-r", "tools/requirements.txt" });   // new ones too
-        steps_ << qMakePair(src + "/tools/lift.sh", QStringList{ gta + "/WINO/Grand Theft Auto.exe" });
+        steps_ << qMakePair(python(), QStringList{ "tools/lift.py", gta + "/WINO/Grand Theft Auto.exe" });
         if (!QFileInfo::exists(src + "/build/build.ninja"))
             steps_ << qMakePair(QString("cmake"), QStringList{ "-S", ".", "-B", "build", "-G", "Ninja" });
         steps_ << qMakePair(QString("cmake"), QStringList{ "--build", "build" });
