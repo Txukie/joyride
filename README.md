@@ -75,8 +75,9 @@ out of sight at the screen's real edges. Menus stay 640×480.
   FAILED!") the city goes back by itself to how it was before the mission,
   so you can return to where it started and take it again: the phone
   rings again, a car you get into to start a job is back where it was
-  parked (made again if it was wrecked), and the mission's own cars and
-  people are taken away so it starts afresh. Your score, weapons and place are kept. Not in
+  parked (made again if it was wrecked; if you are still in it, it is
+  yours to keep as it is and a new one is parked there), and the mission's
+  own cars and people are taken away so it starts afresh. Your score, weapons and place are kept. Not in
   network games.
 
 **Pause menu and saving (Start, or F6).** GTA never let you save; joyride

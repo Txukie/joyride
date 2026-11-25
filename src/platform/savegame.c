@@ -506,7 +506,7 @@ static int32_t make_car(int32_t line, const carinfo_t *ci, int32_t bz) {
 
 static void retry_now(void) {
     city_t *r = &g_rcity;
-    int cars = 0, peds = 0, made = 0;
+    int cars = 0, peds = 0, made = 0, kept = 0;
     static int32_t gone[1024];
     int ngone = 0;
     /* what the mission made: away */
@@ -534,9 +534,23 @@ static void retry_now(void) {
         memcpy(&oid, r->objs + o * 32u + 4, 4);
         int32_t x, y, z, rot;
         int alive = car_alive(oid);
-        if (alive) obj_where(g_oline[o], &x, &y, &z, &rot);
-        if (alive && x >> 6 == ci->bx && y >> 6 == ci->by) continue;   /* where it was */
-        if (!alive || del_car(oid)) again[o] = 1;   /* a wreck is left to the game; not one with someone in it */
+        if (!alive) { again[o] = 1; continue; }           /* a wreck is left to the game */
+        /* someone in it (+2 the driver, -1 none: the player who started a
+         * job by getting in, or a frenzy): theirs to keep as it is, an
+         * ordinary car now (+0x134 -1, as traffic, and off the mission's
+         * cars), or the trigger would go off again at once; a new one
+         * where it stood */
+        if ((int16_t)MEM16(car_at(oid) + 2) >= 0) {
+            uint32_t arg = (uint32_t)oid;
+            hle_call_guest(0x43CE60, 1, &arg);
+            if (MEM16(car_at(oid) + 0x134) != 0xFFFF) kept++;
+            MEM16(car_at(oid) + 0x134) = 0xFFFF;
+            again[o] = 1;
+            continue;
+        }
+        obj_where(g_oline[o], &x, &y, &z, &rot);
+        if (x >> 6 == ci->bx && y >> 6 == ci->by) continue;   /* where it was */
+        if (del_car(oid)) again[o] = 1;
     }
     /* the script as it was */
     for (uint32_t i = 0; i < g_nobj * 32u; i++) MEM8(OBJS + i) = r->objs[i];
@@ -556,15 +570,24 @@ static void retry_now(void) {
     for (uint32_t o = 0; o < g_nobj; o++) {
         if (!again[o]) continue;
         uint32_t a = OBJS + o * 32u;
-        int32_t id = make_car(g_oline[o], &r->cars[o], (int32_t)MEM32(a + 0x18));
+        int32_t oid, id = -2;
+        memcpy(&oid, r->objs + o * 32u + 4, 4);
+        for (uint32_t e = 0; e < o && id == -2; e++) {      /* one car for all the objects it was */
+            int32_t eid;
+            memcpy(&eid, r->objs + e * 32u + 4, 4);
+            if (again[e] && eid == oid) id = (int32_t)MEM32(OBJS + e * 32u + 4);
+        }
+        if (id == -2) {
+            id = make_car(g_oline[o], &r->cars[o], (int32_t)MEM32(a + 0x18));
+            if (id >= 0) made++;
+        }
         MEM32(a + 4) = (uint32_t)id;
-        if (id >= 0) made++;
     }
     for (int k = 0; k < nheld; k++) MEM8(car_at(held[k]) + 0x139) = 0;
     g_retry = 0;
     checkpoint(1);
-    fprintf(stderr, "[save] retry: the city before the mission (%d cars and %d people of the mission taken away, %d cars made again)\n",
-            cars, peds, made);
+    fprintf(stderr, "[save] retry: the city before the mission (%d cars and %d people of the mission taken away, %d cars made again, %d of them left to who is in them)\n",
+            cars, peds, made, kept);
 }
 
 /* ---- loading ----------------------------------------------------------------- */
