@@ -28,6 +28,7 @@
 #include <SDL3/SDL.h>
 
 #include "win32hle.h"
+#include "joyride_icon.h"
 #include "joyride_hle.h"
 
 #define WM_CLOSE       0x0010u
@@ -1416,6 +1417,10 @@ int hle_screen_open(const char *title, int fullscreen, int headless) {
     g_win = SDL_CreateWindow(title, 1280, 960, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
                                                | (fullscreen ? SDL_WINDOW_FULLSCREEN : 0));
     if (!g_win) { fprintf(stderr, "[screen] window: %s\n", SDL_GetError()); return -1; }
+    {                                                     /* joyride's icon (art/) */
+        SDL_Surface *icon = SDL_LoadPNG_IO(SDL_IOFromConstMem(joyride_icon_png, sizeof joyride_icon_png), true);
+        if (icon) SDL_SetWindowIcon(g_win, icon), SDL_DestroySurface(icon);
+    }
     g_gpu = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL,
                                 getenv("JOYRIDE_GPU_DEBUG") != NULL, NULL);
     if (!g_gpu || !SDL_ClaimWindowForGPUDevice(g_gpu, g_win)) {

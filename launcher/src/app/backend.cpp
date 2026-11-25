@@ -24,14 +24,6 @@ Backend::Backend(QObject *parent) : QObject(parent) {}
 
 QString Backend::homeDir() const { return QDir::homePath(); }
 
-QString Backend::backdrop() const {
-    for (const char *n : { "gta1.png", "delta.png", "delta.jpg" }) {
-        QString p = q(jl::dataRoot()) + "/extracted/menu/" + n;
-        if (QFileInfo::exists(p)) return QUrl::fromLocalFile(p).toString();
-    }
-    return "";
-}
-
 // joyride's checkout: JOYRIDE_SOURCE_DIR (the environment, then the one this
 // launcher was built from)
 QString Backend::sourceDir() const {

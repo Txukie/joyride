@@ -64,6 +64,12 @@ add_library(win32hle STATIC ${WIN32HLE_SOURCES}
     src/platform/gdidc_sdl3.c
     src/platform/dsound_sdl3.c)
 target_include_directories(win32hle PRIVATE src/hle)
+# the window's icon (art/joyride-128.png, joyride's own), in the program
+file(READ "${CMAKE_SOURCE_DIR}/art/joyride-128.png" JOYRIDE_ICON HEX)
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," JOYRIDE_ICON "${JOYRIDE_ICON}")
+file(WRITE "${CMAKE_BINARY_DIR}/icon/joyride_icon.h" "static const unsigned char joyride_icon_png[] = { ${JOYRIDE_ICON} };\n")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/art/joyride-128.png")
+target_include_directories(win32hle PRIVATE "${CMAKE_BINARY_DIR}/icon")
 target_include_directories(win32hle PUBLIC "${PCRECOMP}/runtime/win32hle" "${PCRECOMP}/runtime/recomp32")
 target_compile_definitions(win32hle PUBLIC ${JOYRIDE_DEFS})
 target_compile_options(win32hle PRIVATE -w)

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- joyride's icon: a car seen from above, sliding round a bend at night.
+     Original art for joyride (CC0); rendered to PNG by tools/art.sh. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#242833"/>
+      <stop offset="1" stop-color="#0d0f13"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.58" cy="0.46" r="0.5">
+      <stop offset="0" stop-color="#f0b429" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#f0b429" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffd05a"/>
+      <stop offset="0.5" stop-color="#f0b429"/>
+      <stop offset="1" stop-color="#c98a10"/>
+    </linearGradient>
+    <clipPath id="tile"><rect x="16" y="16" width="480" height="480" rx="104"/></clipPath>
+  </defs>
+
+  <rect x="16" y="16" width="480" height="480" rx="104" fill="url(#bg)"/>
+  <g clip-path="url(#tile)">
+    <!-- the road: a wide bend from the bottom left to the top right -->
+    <path d="M -40 470 C 140 470, 250 400, 300 260 S 420 40, 560 40" fill="none" stroke="#2e333d" stroke-width="150" stroke-linecap="butt"/>
+    <path d="M -40 470 C 140 470, 250 400, 300 260 S 420 40, 560 40" fill="none" stroke="#3a404c" stroke-width="150" stroke-dasharray="0" opacity="0.0"/>
+    <!-- its middle line -->
+    <path d="M -40 470 C 140 470, 250 400, 300 260 S 420 40, 560 40" fill="none" stroke="#f0b429" stroke-width="9" stroke-dasharray="34 26" opacity="0.55"/>
+    <rect x="0" y="0" width="512" height="512" fill="url(#glow)"/>
+    <!-- skid marks, out of the bend -->
+    <path d="M 96 452 C 170 446, 214 420, 236 372" fill="none" stroke="#0b0c0f" stroke-width="15" stroke-linecap="round" opacity="0.85"/>
+    <path d="M 118 486 C 196 478, 250 446, 276 392" fill="none" stroke="#0b0c0f" stroke-width="15" stroke-linecap="round" opacity="0.85"/>
+  </g>
+
+  <!-- the car, nose up the road, its tail out -->
+  <g transform="translate(292 300) rotate(28)">
+    <!-- shadow -->
+    <rect x="-66" y="-120" width="140" height="250" rx="44" fill="#000" opacity="0.45" transform="translate(10 12)"/>
+    <!-- wheels -->
+    <rect x="-74" y="-92" width="22" height="50" rx="8" fill="#0b0c0f"/>
+    <rect x="52" y="-92" width="22" height="50" rx="8" fill="#0b0c0f"/>
+    <rect x="-74" y="44" width="22" height="54" rx="8" fill="#0b0c0f"/>
+    <rect x="52" y="44" width="22" height="54" rx="8" fill="#0b0c0f"/>
+    <!-- body -->
+    <rect x="-64" y="-124" width="128" height="250" rx="46" fill="url(#body)"/>
+    <!-- bonnet line -->
+    <path d="M -40 -112 Q 0 -126 40 -112" fill="none" stroke="#a86f05" stroke-width="5" stroke-linecap="round"/>
+    <!-- windscreen, roof, rear window -->
+    <path d="M -48 -46 Q 0 -70 48 -46 L 40 -12 Q 0 -24 -40 -12 Z" fill="#1a1d24"/>
+    <rect x="-42" y="-8" width="84" height="66" rx="14" fill="#e8a516"/>
+    <path d="M -40 62 Q 0 72 40 62 L 46 88 Q 0 102 -46 88 Z" fill="#1a1d24"/>
+    <!-- head and tail lights -->
+    <rect x="-50" y="-126" width="26" height="10" rx="5" fill="#fff6d8"/>
+    <rect x="24" y="-126" width="26" height="10" rx="5" fill="#fff6d8"/>
+    <rect x="-52" y="116" width="28" height="10" rx="5" fill="#ff3b30"/>
+    <rect x="24" y="116" width="28" height="10" rx="5" fill="#ff3b30"/>
+    <!-- racing stripes -->
+    <rect x="-9" y="-122" width="7" height="72" fill="#1a1d24" opacity="0.55"/>
+    <rect x="2" y="-122" width="7" height="72" fill="#1a1d24" opacity="0.55"/>
+  </g>
+</svg>

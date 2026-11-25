@@ -4,6 +4,7 @@
 #include "gamepad.h"
 
 #include <QGuiApplication>
+#include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -15,6 +16,10 @@ int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
     app.setApplicationName("joyride");
     app.setOrganizationName("joyride");
+    app.setDesktopFileName("joyride");
+    QIcon icon;
+    for (int n : { 16, 32, 48, 64, 128, 256 }) icon.addFile(QString(":/art/joyride-%1.png").arg(n), QSize(n, n));
+    app.setWindowIcon(icon);
     QQuickStyle::setStyle("Basic");
 
     Backend backend;

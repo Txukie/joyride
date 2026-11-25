@@ -19,7 +19,6 @@ class Backend : public QObject {
     Q_PROPERTY(QStringList steamInstalls READ steamInstalls NOTIFY changed)
     Q_PROPERTY(QString homeDir READ homeDir CONSTANT)
     Q_PROPERTY(bool playing READ playing NOTIFY playingChanged)
-    Q_PROPERTY(QString backdrop READ backdrop CONSTANT)
 
 public:
     explicit Backend(QObject *parent = nullptr);
@@ -34,7 +33,6 @@ public:
     QStringList steamInstalls() const;
     QString homeDir() const;
     bool playing() const { return playing_; }
-    QString backdrop() const;                                       // the menus' wide picture, if the player has one
 
     Q_INVOKABLE void installFrom(const QString &id, const QString &path);
     Q_INVOKABLE void uninstall(const QString &id);

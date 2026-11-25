@@ -6,10 +6,9 @@ The menus stay 640x480 (4:3); on a wider screen joyride draws a picture
 behind them, cropped about its middle to the window (backdrop.c). Made here
 from the menu's own art, 32:9 wide so every narrower shape is a crop of it:
 
-  gta1        the rusted wall of GTA's menus (F_UPPER over F_LOWER0) carried
-              on: another stretch of the same wall, its fine detail kept and
-              its light continued from the menu's edges, falling away to
-              the sides; the menu a panel on it, a soft shadow round it.
+  gta1        the rust of GTA's menus (F_UPPER over F_LOWER0) at its warmest,
+              darkened, with a city seen from above in it (art.py's), tone
+              on tone; the menu a panel on it, a soft shadow round it.
   london1969  the teal of London's menus, a shade darker, with faint mod
               target roundels; the same panel and shadow.
   london1961  the same teal with a faint houndstooth.
@@ -28,25 +27,6 @@ from PIL import Image
 MENU_W, MENU_H = 640, 480
 WIDE = 1708                 # 32:9 at 480 rows
 SCALE = 2                   # the picture is made at twice the menu's size
-
-
-def blur(a, s):
-    """Gaussian blur, edges reflected (a: H x W or H x W x C, float)"""
-    r = max(1, int(3 * s))
-    k = np.exp(-0.5 * (np.arange(-r, r + 1) / s) ** 2)
-    k /= k.sum()
-
-    def one(x, axis):
-        pad = [(0, 0)] * x.ndim
-        pad[axis] = (r, r)
-        xp = np.pad(x, pad, mode='reflect')
-        out = np.zeros_like(x)
-        for i, w in enumerate(k):
-            sl = [slice(None)] * x.ndim
-            sl[axis] = slice(i, i + x.shape[axis])
-            out += w * xp[tuple(sl)]
-        return out
-    return one(one(a, 0), 1)
 
 
 def find(gtadata, name):
@@ -68,69 +48,32 @@ def menu_picture(gtadata):
     return np.concatenate([raw(gtadata, 'F_UPPER'), raw(gtadata, 'F_LOWER0')])
 
 
-def distance(out_w, x0):
-    """each column's distance (pixels) outside the menu, 0 inside"""
-    xs = np.arange(out_w)
-    return np.where(xs < x0, x0 - xs, np.where(xs >= x0 + MENU_W, xs - (x0 + MENU_W - 1), 0)).astype(np.float32)
-
-
 def panel_shadow(dist, depth, reach):
     """how much darker (log) the wall is by the menu's panel"""
     return depth * np.exp(-np.maximum(dist - 1, 0) / reach) * (dist > 0)
 
 
-def gta1(gtadata):
-    eps = 0.06
+def wall(gtadata, pattern, base=None, depth=0.11):
+    """the menu a panel on a wall of one colour (the menu's own, or base)
+    with a motif in it, tone on tone: pattern(xs, ys, x0) -> -1..1, drawn at
+    the final size (4 samples a pixel each way), in the menu's pixels as
+    units; or the motif already made, an array at the final size"""
     src = menu_picture(gtadata).astype(np.float32) / 255
+    if base is None:
+        base = src[MENU_H - 2, 2]            # the lower half's flat colour (London's teal)
     out_w, x0 = WIDE, (WIDE - MENU_W) // 2
-    lg = np.log(src + eps)
-    low = blur(lg, 36)                       # the light
-    det = lg - low                           # the wall's own detail
-    # the sides: another stretch of the wall (upside down, from the far
-    # side of the menu), so nothing repeats beside the panel
-    n = x0
-    turned = det[::-1]
-    reach = min(n, MENU_W)
-    canvas = np.zeros((MENU_H, out_w, 3), np.float32)
-    canvas[:, x0:x0 + MENU_W] = det
-    left = turned[:, MENU_W - reach:]
-    right = turned[:, :reach]
-    if n > reach:                            # wider than the wall: the far end turned again
-        left = np.concatenate([det[:, ::-1][:, MENU_W - (n - reach):], left], axis=1)
-        right = np.concatenate([right, det[:, ::-1][:, :n - reach]], axis=1)
-    canvas[:, :x0] = left[:, -x0:]
-    canvas[:, x0 + MENU_W:] = right[:, :out_w - x0 - MENU_W]
-    # the light: the menu's edge columns held outward, smoothed, falling away
-    dist = distance(out_w, x0)
-    L = np.zeros_like(canvas)
-    L[:, x0:x0 + MENU_W] = low
-    L[:, :x0] = low[:, :8].mean(1)[:, None, :]
-    L[:, x0 + MENU_W:] = low[:, -8:].mean(1)[:, None, :]
-    Ls = blur(L, 30)
-    w = np.clip(dist / 80, 0, 1)[None, :, None]
-    L = L * (1 - w) + Ls * w
-    L -= (1.1 * (dist / 534.0) ** 1.6)[None, :, None]
-    L -= panel_shadow(dist, 0.9, 16.0)[None, :, None]
-    out = np.exp(L + canvas) - eps
-    out[:, x0:x0 + MENU_W] = src
-    return out
-
-
-def teal_wall(gtadata, pattern):
-    """made at the final size (the motif's edges drawn there, 4 samples a
-    pixel each way), in the menu's pixels as units"""
-    src = menu_picture(gtadata).astype(np.float32) / 255
-    base = src[MENU_H - 2, 2]                # the lower half's flat teal
-    out_w, x0 = WIDE, (WIDE - MENU_W) // 2
-    n = SCALE * 4
-    ys, xs = np.mgrid[0:MENU_H * n, 0:out_w * n].astype(np.float32)
-    shade = pattern((xs + 0.5) / n, (ys + 0.5) / n, x0)        # -1..1, the motif
-    shade = shade.reshape(MENU_H * SCALE, 4, out_w * SCALE, 4).mean((1, 3))
+    if callable(pattern):
+        n = SCALE * 4
+        ys, xs = np.mgrid[0:MENU_H * n, 0:out_w * n].astype(np.float32)
+        shade = pattern((xs + 0.5) / n, (ys + 0.5) / n, x0)
+        shade = shade.reshape(MENU_H * SCALE, 4, out_w * SCALE, 4).mean((1, 3))
+    else:
+        shade = pattern
     ys, xs = np.mgrid[0:MENU_H * SCALE, 0:out_w * SCALE].astype(np.float32)
     ys, xs = (ys + 0.5) / SCALE, (xs + 0.5) / SCALE
     dist = np.where(xs < x0, x0 - xs, np.where(xs >= x0 + MENU_W, xs - (x0 + MENU_W), 0)).astype(np.float32)
     L = np.full(xs.shape, np.log(0.82), np.float32)              # a shade darker than the menu
-    L += 0.11 * shade
+    L += depth * shade
     L -= 0.55 * (dist / 534.0) ** 1.8                            # falling away to the sides
     L -= 0.35 * ((ys - MENU_H / 2) / (MENU_H / 2)) ** 2 * (dist > 0)   # and to top and bottom
     L -= panel_shadow(dist, 0.75, 14.0)
@@ -139,6 +82,28 @@ def teal_wall(gtadata, pattern):
                      np.float32) / 255
     out[:, x0 * SCALE:(x0 + MENU_W) * SCALE] = big
     return out, True
+
+
+def streets(seed=1997):
+    """a city seen from above, as GTA sees it: art.py's, its light as the
+    motif (-1..1), no colour of its own"""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from art import city
+    pic, _ = city(WIDE * SCALE, MENU_H * SCALE, block=22 * SCALE, seed=seed, cars=False)
+    lum = pic @ np.array([0.3, 0.59, 0.11], np.float32)
+    return np.clip((lum - lum.mean()) / (3 * lum.std() + 1e-6), -1, 1)
+
+
+def gta1_wall(gtadata):
+    """GTA's: the dark rust of its menu, the city in it"""
+    src = menu_picture(gtadata).astype(np.float32) / 255
+    # the rust at its warmest (the menu's orange, darkened): its brightest
+    # tenth, as dark as London's teal
+    lum = src @ np.array([0.3, 0.59, 0.11], np.float32)
+    warm = src[(lum > np.quantile(lum, 0.9)) & (src[..., 0] > src[..., 2] * 1.6)]
+    hue = warm.mean(0) if len(warm) else np.array([0.6, 0.32, 0.12], np.float32)
+    base = hue * (0.17 / float(hue @ np.array([0.3, 0.59, 0.11])))
+    return wall(gtadata, streets(), base=base, depth=0.40)
 
 
 def roundels(xs, ys, x0):
@@ -163,9 +128,9 @@ def houndstooth(xs, ys, x0):
 
 
 MAKERS = {
-    'gta1': gta1,
-    'london1969': lambda d: teal_wall(d, roundels),
-    'london1961': lambda d: teal_wall(d, houndstooth),
+    'gta1': gta1_wall,
+    'london1969': lambda d: wall(d, roundels),
+    'london1961': lambda d: wall(d, houndstooth),
 }
 
 

@@ -94,12 +94,16 @@ score and weapons but not that mission (the menu says first how long ago
 it started; a failed mission is offered again). See
 `src/platform/savegame.c`. Not in network games.
 
+**joyride's own art** (`art/`: the icon, `joyride.svg`, and the launcher's
+background, a city at night seen from above) is original, made for joyride
+by `tools/art.py`, and free to use (CC0); nothing in it is from the games.
+
 **Menus and the intro on wide screens.** The menus stay 640×480; on a
 screen that is not 4:3 joyride puts them on a wall that goes with each
 game, made from that game's own menu art when joyride is prepared (or the
-first time the game starts), by `tools/backdrops.py`: GTA's rusted wall
-carried on, London 1969's teal with mod roundels, London 1961's with a
-houndstooth. They are in `~/.local/share/joyride/extracted/menu/` as
+first time the game starts), by `tools/backdrops.py`: GTA's rust with a
+city seen from above in it, London 1969's teal with mod roundels, London
+1961's with a houndstooth. They are in `~/.local/share/joyride/extracted/menu/` as
 `gta1.png`, `london1969.png` and `london1961.png` (32:9, cropped to the
 window); put your own picture there under that name to use it instead
 (`delta.png` or `delta.jpg` there is used for a game that has none). The
