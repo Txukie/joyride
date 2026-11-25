@@ -225,13 +225,33 @@ static void audio_open(void) {
     else fprintf(stderr, "[mss] no audio device: %s\n", SDL_GetError());
 }
 
+/* ---- held: the pause (and the settings) in play ------------------------------
+ * Everything of the game's that goes on by itself stops: the sound (the
+ * device paused, so music and effects carry on where they were), the
+ * timers that drive the game (their threads wait, without firing), and the
+ * clock the game reads (AIL_ms_count: the time held is taken out of it). */
+static volatile int g_held;
+static uint64_t g_held_t0, g_held_total;
+
+void joyride_game_hold(int on) {
+    if (on == g_held) return;
+    if (on) {
+        g_held_t0 = SDL_GetTicks();
+        if (g_sdl_out) SDL_PauseAudioStreamDevice(g_sdl_out);
+    } else {
+        g_held_total += SDL_GetTicks() - g_held_t0;
+        if (g_sdl_out) SDL_ResumeAudioStreamDevice(g_sdl_out);
+    }
+    g_held = on;
+}
+
 /* ---- timers ---------------------------------------------------------------- */
 
 static void *timer_thread(void *arg) {
     atimer_t *t = (atimer_t *)arg;
     uint64_t due = SDL_GetTicks() * 1000;
     while (!t->released) {
-        if (!t->running || !t->period_us) { usleep(1000); due = SDL_GetTicks() * 1000; continue; }
+        if (!t->running || !t->period_us || g_held) { usleep(1000); due = SDL_GetTicks() * 1000; continue; }
         due += t->period_us;
         int64_t wait = (int64_t)due - (int64_t)(SDL_GetTicks() * 1000);
         if (wait > 0) usleep((useconds_t)wait);
@@ -254,7 +274,10 @@ static void a_shutdown(void) {
     RET(0, 0);
 }
 static void a_set_preference(void) { RET(0, 2); }            /* (number, value) -> previous */
-static void a_ms_count(void)       { RET((uint32_t)(SDL_GetTicks() - g_t0_ms), 0); }
+static void a_ms_count(void) {
+    uint64_t now = g_held ? g_held_t0 : SDL_GetTicks();
+    RET((uint32_t)(now - g_held_total - g_t0_ms), 0);
+}
 static void a_mem_alloc_lock(void) { RET(hle_va(hle_alloc(A32(0) ? A32(0) : 1)), 1); }
 static void a_mem_free_lock(void)  { if (A32(0)) hle_free(hle_ptr(A32(0))); RET(0, 1); }
 

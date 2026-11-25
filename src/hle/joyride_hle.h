@@ -58,6 +58,7 @@ extern int joyride_controls_modern;
 void joyride_pad_init(void);
 void joyride_pad_event(const void *sdl_event);
 void joyride_radio_step(int dir);
+void joyride_game_hold(int on);                 /* the game's sound, timers and clock held (the pause) */
 
 /* the city map (src/platform/map.c) */
 void joyride_pad_poll(void);

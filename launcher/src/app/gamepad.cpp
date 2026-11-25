@@ -13,6 +13,7 @@
 
 Gamepad::Gamepad(QObject *parent) : QObject(parent) {
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "0");
+    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");   // SIGINT and SIGTERM end the launcher, as they should
     ok_ = SDL_Init(SDL_INIT_GAMEPAD);
     if (!ok_) return;
     connect(&timer_, &QTimer::timeout, this, &Gamepad::poll);

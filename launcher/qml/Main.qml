@@ -59,7 +59,11 @@ ApplicationWindow {
         anchors.margins: 32
         initialItem: homePage
         focus: true
-        Keys.onEscapePressed: if (depth > 1 && !backend.busy) pop()
+        Keys.onEscapePressed: {                  // B: back a page, or on the first page out of the launcher
+            if (backend.busy) return
+            if (depth > 1) pop()
+            else Qt.quit()
+        }
     }
 
     Connections {

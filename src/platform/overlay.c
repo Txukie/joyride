@@ -487,11 +487,13 @@ void joyride_overlay_draw(uint32_t *bgra, int w, int h) {
 void joyride_safe_point(void) {
     joyride_display_apply();
     if (g_open) {
+        joyride_game_hold(1);                      /* its sound, timers and clock too (mss.c) */
         while (g_open) {
             hle_screen_pump();
             joyride_screen_refresh();
             SDL_Delay(16);
         }
+        joyride_game_hold(0);
         joyride_display_apply();
     }
     if (g_quit) {                                  /* the pause menu's Quit: the game's Esc, its question */

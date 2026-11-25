@@ -84,7 +84,8 @@ In the order the menu shows them, the defaults first.
   weapons and place are kept. Not in network games.
 
 **Pause menu and saving (Start, or F6).** GTA never let you save; joyride
-does. In play, Start (F6 or Esc on the keyboard) pauses with *Continue*, *Save
+does. In play, Start (F6 or Esc on the keyboard) pauses (the game, its
+music, sounds and timers all held) with *Continue*, *Save
 game* and *Quit* (the game asks "Ya want out?": Enter or A ends the level,
 Esc or B plays on). Esc no longer ends a level by itself. One save per
 character and level (each city's chapter), in
@@ -290,7 +291,10 @@ build-launcher/joyride-launcher
 # Without Qt, build-launcher/joyride-setup does the installing from the command line.
 ```
 
-Installs go to `~/.local/share/joyride/games/`.
+Installs go to `~/.local/share/joyride/games/`. On starting, the launcher puts its
+`joyride.desktop` and icon in `~/.local/share/applications/` and
+`~/.local/share/icons/`, so the desktop knows it (its icon, the menu entry).
+B (Esc) goes back a page, and on the first one closes the launcher.
 
 ## Getting started
 

@@ -3,6 +3,9 @@
 #include "backend.h"
 #include "gamepad.h"
 
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QIcon>
 #include <QQmlApplicationEngine>
@@ -12,7 +15,41 @@
 #include <QKeyEvent>
 #include <QTimer>
 
+// The desktop knows an application by its .desktop file: without one the
+// portal refuses the app ID ("App info not found for 'joyride'") and
+// Wayland shows no icon. This launcher's, and its icon, in the user's own
+// data folder; written again if the launcher has moved.
+static void install_desktop_entry() {
+    QString data = qEnvironmentVariable("XDG_DATA_HOME");
+    if (data.isEmpty()) data = QDir::homePath() + "/.local/share";
+    QString exe = QFileInfo("/proc/self/exe").canonicalFilePath();
+    if (exe.isEmpty()) return;
+    QString entry = "[Desktop Entry]\nType=Application\nName=joyride\nComment=Grand Theft Auto, London 1969 and 1961, recompiled\n"
+                    "Exec=\"" + exe + "\"\nIcon=joyride\nTerminal=false\nCategories=Game;\nStartupWMClass=joyride\n";
+    QString path = data + "/applications/joyride.desktop";
+    QFile old(path);
+    if (!old.open(QIODevice::ReadOnly) || QString::fromUtf8(old.readAll()) != entry) {
+        old.close();
+        QDir().mkpath(data + "/applications");
+        QFile f(path);
+        if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) f.write(entry.toUtf8());
+    }
+    for (int n : { 48, 128, 256 }) {
+        QString dir = data + QString("/icons/hicolor/%1x%1/apps").arg(n), icon = dir + "/joyride.png";
+        QFile src(QString(":/art/joyride-%1.png").arg(n));
+        if (!src.open(QIODevice::ReadOnly)) continue;
+        QByteArray png = src.readAll();
+        QFile cur(icon);
+        if (cur.open(QIODevice::ReadOnly) && cur.readAll() == png) continue;
+        cur.close();
+        QDir().mkpath(dir);
+        QFile out(icon);
+        if (out.open(QIODevice::WriteOnly | QIODevice::Truncate)) out.write(png);
+    }
+}
+
 int main(int argc, char **argv) {
+    if (qEnvironmentVariableIsEmpty("JOYRIDE_LAUNCHER_SHOT")) install_desktop_entry();
     QGuiApplication app(argc, argv);
     app.setApplicationName("joyride");
     app.setOrganizationName("joyride");
