@@ -310,6 +310,9 @@ cmake -S . -B build-win -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64.cmake \
 cmake --build build-win      # then SDL3.dll, SDL3_ttf.dll, libwinpthread-1.dll beside joyride.exe
 ```
 
+`tools/wine-run.sh` plays that build under Wine, in its own prefix
+(`~/.local/share/joyride-wine`), with your GTA folder and menu pictures.
+
 ## Getting started
 
 ```bash
