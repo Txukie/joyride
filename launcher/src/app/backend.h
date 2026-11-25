@@ -19,6 +19,7 @@ class Backend : public QObject {
     Q_PROPERTY(QStringList steamInstalls READ steamInstalls NOTIFY changed)
     Q_PROPERTY(QString homeDir READ homeDir CONSTANT)
     Q_PROPERTY(bool playing READ playing NOTIFY playingChanged)
+    Q_PROPERTY(bool fullscreen READ fullscreen NOTIFY settingsChanged)   // the launcher too, as the game
 
 public:
     explicit Backend(QObject *parent = nullptr);
@@ -33,6 +34,7 @@ public:
     QStringList steamInstalls() const;
     QString homeDir() const;
     bool playing() const { return playing_; }
+    bool fullscreen() const { return readCfg().value("fullscreen") != "0"; }
 
     Q_INVOKABLE void installFrom(const QString &id, const QString &path);
     Q_INVOKABLE void uninstall(const QString &id);
@@ -56,6 +58,7 @@ signals:
     void logChanged();
     void finished(bool ok, const QString &message);
     void playingChanged();
+    void settingsChanged();
 
 private:
     void begin(const QString &task);

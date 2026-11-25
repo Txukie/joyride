@@ -209,6 +209,7 @@ void Backend::play(const QString &id) {
         game->deleteLater();
         playing_ = false;
         emit playingChanged();
+        emit settingsChanged();                          // the F1 menu may have changed them
     });
     game->start();
     if (!game->waitForStarted(5000)) {
@@ -288,6 +289,8 @@ void Backend::setSetting(const QString &key, const QString &value) {
     for (const char *k : { "resolution", "filter", "scaling", "fullscreen", "smooth", "renderer", "controller", "hud", "driveby", "retry" })
         out += QString(k) + "=" + cfg[k] + "\n";
     f.write(out.toUtf8());
+    f.close();
+    emit settingsChanged();
 }
 
 QStringList Backend::sourceFilters(const QString &id) const {

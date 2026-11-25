@@ -16,7 +16,8 @@ ApplicationWindow {
     visible: true
     title: "joyride"
     color: "#0f1115"
-    visibility: backend.playing ? Window.Minimized : Window.AutomaticVisibility
+    // as the game's setting has it; out of the way while a game runs
+    visibility: backend.playing ? Window.Minimized : backend.fullscreen ? Window.FullScreen : Window.Windowed
 
     readonly property color accent: "#f0b429"
     readonly property color text: "#f3f4f6"
