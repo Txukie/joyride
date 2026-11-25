@@ -16,6 +16,7 @@ Gamepad::Gamepad(QObject *parent) : QObject(parent) {
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");   // SIGINT and SIGTERM end the launcher, as they should
     ok_ = SDL_Init(SDL_INIT_GAMEPAD);
     if (!ok_) return;
+    qApp->installEventFilter(this);
     connect(&timer_, &QTimer::timeout, this, &Gamepad::poll);
     timer_.start(16);
 }
@@ -24,11 +25,39 @@ Gamepad::~Gamepad() {
     if (ok_) SDL_Quit();
 }
 
+static const quint32 kPadScanCode = 0x6A6F70;            // marks the pad's own key events
+static const qint64 kSameMs = 120;                       // a press from both, this close: the same one
+
 void Gamepad::key(int qtKey, bool down) {
     QWindow *w = QGuiApplication::focusWindow();
     if (!w) return;
-    QKeyEvent e(down ? QEvent::KeyPress : QEvent::KeyRelease, qtKey, Qt::NoModifier);
+    qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (down) {
+        if (now - nativeAt_.value(qtKey, -100000) < kSameMs) { skipped_.insert(qtKey); return; }   // the keyboard's came first
+        down_.insert(qtKey);
+    } else {
+        down_.remove(qtKey);
+        if (skipped_.remove(qtKey)) return;
+    }
+    sentAt_[qtKey] = now;
+    QKeyEvent e(down ? QEvent::KeyPress : QEvent::KeyRelease, qtKey, Qt::NoModifier, kPadScanCode, 0, 0);
     QCoreApplication::sendEvent(w, &e);
+}
+
+bool Gamepad::eventFilter(QObject *obj, QEvent *ev) {
+    if ((ev->type() == QEvent::KeyPress || ev->type() == QEvent::KeyRelease) && connected_ && !paused_) {
+        auto *ke = static_cast<QKeyEvent *>(ev);
+        int k = ke->key();
+        bool mapped = k == Qt::Key_Up || k == Qt::Key_Down || k == Qt::Key_Left || k == Qt::Key_Right ||
+                      k == Qt::Key_Return || k == Qt::Key_Enter || k == Qt::Key_Escape || k == Qt::Key_Tab || k == Qt::Key_Backtab;
+        if (mapped && ke->nativeScanCode() != kPadScanCode && obj->isWindowType()) {
+            qint64 now = QDateTime::currentMSecsSinceEpoch();
+            int kk = k == Qt::Key_Enter ? Qt::Key_Return : k;
+            if (down_.contains(kk) || now - sentAt_.value(kk, -100000) < kSameMs) return true;   // the pad's, again
+            nativeAt_[kk] = now;
+        }
+    }
+    return QObject::eventFilter(obj, ev);
 }
 
 void Gamepad::poll() {
@@ -79,7 +108,8 @@ void Gamepad::poll() {
         SDL_Gamepad *g = SDL_GetGamepadFromID(ids[i]);
         if (!g) continue;
         int x = SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTX), y = SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTY);
-        const int dead = 20000;
+        // a direction taken past 24000, kept until back under 14000: no flicker at the edge
+        int dead = stickDir_ ? 14000 : 24000;
         if (std::abs(x) > std::abs(y)) dir = x > dead ? Qt::Key_Right : x < -dead ? Qt::Key_Left : 0;
         else dir = y > dead ? Qt::Key_Down : y < -dead ? Qt::Key_Up : 0;
     }
@@ -94,6 +124,6 @@ void Gamepad::poll() {
     int rep = held_ ? held_ : stickDir_;
     if (rep && now >= nextRepeat_) {
         key(rep, true);
-        nextRepeat_ = now + 120;
+        nextRepeat_ = now + 160;
     }
 }
