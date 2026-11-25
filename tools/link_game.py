@@ -13,7 +13,8 @@ tools/appimage.sh, tools/windows-bundle.sh), saying how its system links:
                           -O1 -w -DRECOMP_MEM_BASE=..., its headers
     "libs": [...]         in link order: files relative to the folder,
                           or -l names
-    "ldflags": [...] }      ({rt} in a flag or file: the folder)
+    "ldflags": [...],       ({rt} in a flag or file: the folder)
+    "beside": [...] }       files copied beside the exe (Windows: its DLLs)
 
 The compiler: --cc, else CC, else the folder's cc/joyride-cc(.cmd), else
 gcc. Output: build/joyride(.exe) in joyride's source folder.
@@ -86,6 +87,8 @@ def main(argv):
     r = subprocess.run([cc, '-o', out] + objs + libs + [sub(f) for f in how.get('ldflags', [])])
     if r.returncode:
         sys.exit('the link failed')
+    for f in how.get('beside', []):                       # what it needs beside it (Windows: its DLLs)
+        shutil.copy2(os.path.join(rt, sub(f)), os.path.dirname(out))
     print(f'joyride ready: {out}')
 
 
