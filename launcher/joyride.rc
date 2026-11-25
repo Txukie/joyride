@@ -1,0 +1,2 @@
+// the window icon on Windows (art/joyride.ico)
+IDI_ICON1 ICON "../art/joyride.ico"

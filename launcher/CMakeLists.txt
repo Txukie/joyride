@@ -36,9 +36,22 @@ if(Qt6_FOUND AND SDL3_FOUND)
         src/app/main.cpp
         src/app/backend.cpp
         src/app/gamepad.cpp)
+    if(WIN32)
+        enable_language(RC)
+        target_sources(joyride-launcher PRIVATE joyride.rc)                     # its icon
+        set_target_properties(joyride-launcher PROPERTIES WIN32_EXECUTABLE ON)  # no console window
+    endif()
+    # cross-compiled (Windows, cmake/mingw-w64.cmake), the QML is not
+    # compiled ahead: this machine's qmlcachegen writes for its own Qt's
+    # private headers, which a patch release apart do not match
+    set(JOYRIDE_QML_OPTS)
+    if(CMAKE_CROSSCOMPILING)
+        set(JOYRIDE_QML_OPTS NO_CACHEGEN)
+    endif()
     qt_add_qml_module(joyride-launcher
         URI JoyrideLauncher
         VERSION 1.0
+        ${JOYRIDE_QML_OPTS}
         QML_FILES qml/Main.qml qml/BigButton.qml qml/GameCard.qml)
     # joyride's own art (art/, made by tools/art.py): the background, the icon
     qt_add_resources(joyride-launcher "art" PREFIX "/" BASE ".."

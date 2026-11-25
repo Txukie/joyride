@@ -31,12 +31,20 @@ one() { ls -d $1 2>/dev/null | sort -V | tail -1; }   # the newest of a pattern
 sdl="$(one "$deps/SDL3-[0-9]*/x86_64-w64-mingw32")"
 ttf="$(one "$deps/SDL3_ttf-[0-9]*/x86_64-w64-mingw32")"
 [ -d "$sdl" ] && [ -d "$ttf" ] || { echo "SDL3 and SDL3_ttf's MinGW packages are not in $deps"; exit 1; }
+# ffmpeg for the intro movie: MSYS2's UCRT64 package and what it needs,
+# unpacked under <work>/msys/root (pacman with <work>/msys/pacman.conf)
+msys="$work/msys/root"
+ff="$msys/ucrt64"
+[ -f "$ff/lib/pkgconfig/libavformat.pc" ] || { echo "ffmpeg (MSYS2's ucrt64 packages) is not in $msys"; exit 1; }
 
 echo "== joyride's runtime for Windows (no game code)"
+PKG_CONFIG_LIBDIR="$ff/lib/pkgconfig" PKG_CONFIG_SYSROOT_DIR="$msys" \
 cmake -S "$root" -B "$work/runtime" -G Ninja -DCMAKE_BUILD_TYPE=Release -DJOYRIDE_RUNTIME_ONLY=ON -DJOYRIDE_RELEASE=ON \
-      -DCMAKE_TOOLCHAIN_FILE="$root/cmake/mingw-w64.cmake" -DCMAKE_PREFIX_PATH="$sdl;$ttf" -DJOYRIDE_WITH_FFMPEG=OFF >/dev/null
-cmake --build "$work/runtime" --target joyride_runtime win32hle joyride_compat
+      -DCMAKE_TOOLCHAIN_FILE="$root/cmake/mingw-w64.cmake" -DCMAKE_PREFIX_PATH="$sdl;$ttf" -DJOYRIDE_WITH_FFMPEG=ON \
+      -DPKG_CONFIG_EXECUTABLE="$(command -v pkg-config)" >/dev/null
+cmake --build "$work/runtime" --target joyride_runtime win32hle joyride_compat joyride_icon
 cp "$work/runtime/"lib{joyride_runtime,win32hle,joyride_compat}.a "$R/"
+cp "$work/runtime/CMakeFiles/joyride_icon.dir/src/compat/win/joyride.rc.res" "$R/joyride_icon.o"   # joyride.exe's icon (a COFF object)
 if x86_64-w64-mingw32-nm --defined-only "$R"/*.a 2>/dev/null | grep -qE ' sub_[0-9A-F]{8}$'; then
     echo "the runtime has generated game code in it: not packaged"; exit 1
 fi
@@ -87,16 +95,35 @@ rm -rf "$work/winlibs"
          $T/include/windows.*.h $T/include/c++ $T/include/*.tlb
   rm -rf include/c++ )
 
+# ffmpeg's import libraries, and its DLLs with theirs, followed through
+# their imports (what Windows has itself is not in MSYS2's bin, so stops)
+cp "$ff"/lib/lib{avformat,avcodec,avutil}.dll.a "$R/"
+mkdir -p "$R/dll"
+todo="$(cd "$ff/bin" && ls avformat-*.dll avcodec-*.dll avutil-*.dll)"
+while [ -n "$todo" ]; do
+    next=""
+    for d in $todo; do
+        [ -f "$R/dll/$d" ] && continue
+        cp "$ff/bin/$d" "$R/dll/"
+        for n in $(x86_64-w64-mingw32-objdump -p "$ff/bin/$d" | awk '/DLL Name/{print $3}'); do
+            [ -f "$ff/bin/$n" ] && [ ! -f "$R/dll/$n" ] && next="$next $n"
+        done
+    done
+    todo="$next"
+done
+beside="$(cd "$R" && for f in SDL3.dll SDL3_ttf.dll cc/bin/libwinpthread-1.dll dll/*.dll; do printf '"%s", ' "$f"; done)"
+
 # how tools/link_game.py links the game here: the flags the game's own
 # build has on Windows (CMakeLists.txt), its libraries in order, its DLLs
-cat > "$R/link.json" <<'EOF'
+cat > "$R/link.json" <<EOF
 { "exe": "joyride.exe",
   "cflags": ["-Dweak=selectany", "-fcommon"],
-  "libs": ["libjoyride_runtime.a", "libwin32hle.a", "libjoyride_compat.a", "libSDL3_ttf.dll.a", "libSDL3.dll.a",
+  "libs": ["joyride_icon.o", "libjoyride_runtime.a", "libwin32hle.a", "libjoyride_compat.a", "libSDL3_ttf.dll.a", "libSDL3.dll.a",
+           "libavformat.dll.a", "libavcodec.dll.a", "libavutil.dll.a",
            "-lws2_32", "-lwinmm", "-lm", "-lkernel32", "-luser32", "-lgdi32", "-lshell32", "-lole32", "-loleaut32",
            "-luuid", "-ladvapi32"],
   "ldflags": [],
-  "beside": ["SDL3.dll", "SDL3_ttf.dll", "cc/bin/libwinpthread-1.dll"] }
+  "beside": [${beside%, }] }
 EOF
 
 echo "== Python for Windows"

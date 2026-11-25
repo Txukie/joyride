@@ -1,0 +1,3 @@
+// joyride.exe's icon on Windows (art/joyride.ico); compiled once, linked in by the build
+// and, on a player's machine, by tools/link_game.py (the bundle's joyride_icon.o)
+IDI_ICON1 ICON "../../../art/joyride.ico"
