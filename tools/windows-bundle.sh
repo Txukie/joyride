@@ -33,7 +33,7 @@ ttf="$(one "$deps/SDL3_ttf-[0-9]*/x86_64-w64-mingw32")"
 [ -d "$sdl" ] && [ -d "$ttf" ] || { echo "SDL3 and SDL3_ttf's MinGW packages are not in $deps"; exit 1; }
 
 echo "== joyride's runtime for Windows (no game code)"
-cmake -S "$root" -B "$work/runtime" -G Ninja -DCMAKE_BUILD_TYPE=Release -DJOYRIDE_RUNTIME_ONLY=ON \
+cmake -S "$root" -B "$work/runtime" -G Ninja -DCMAKE_BUILD_TYPE=Release -DJOYRIDE_RUNTIME_ONLY=ON -DJOYRIDE_RELEASE=ON \
       -DCMAKE_TOOLCHAIN_FILE="$root/cmake/mingw-w64.cmake" -DCMAKE_PREFIX_PATH="$sdl;$ttf" -DJOYRIDE_WITH_FFMPEG=OFF >/dev/null
 cmake --build "$work/runtime" --target joyride_runtime win32hle joyride_compat
 cp "$work/runtime/"lib{joyride_runtime,win32hle,joyride_compat}.a "$R/"

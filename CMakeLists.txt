@@ -9,6 +9,9 @@ set(JOYRIDE_GEN_DIR "${CMAKE_SOURCE_DIR}/gen/wino/recomp" CACHE PATH
 # JOYRIDE_RUNTIME_ONLY: joyride without the game, its runtime library alone
 # (what the AppImage carries; the player's machine adds the generated code)
 option(JOYRIDE_RUNTIME_ONLY "Build only joyride's runtime library, no generated code" OFF)
+# JOYRIDE_RELEASE: a build for players (the AppImage, the Windows bundle):
+# without the debugging aids (debug.c: L4's report, L5's weapons and cars)
+option(JOYRIDE_RELEASE "A release: no debugging aids" OFF)
 file(GLOB JOYRIDE_GEN_SOURCES "${JOYRIDE_GEN_DIR}/*.c")
 if(NOT JOYRIDE_GEN_SOURCES AND NOT JOYRIDE_RUNTIME_ONLY)
     message(FATAL_ERROR "No generated code in ${JOYRIDE_GEN_DIR}. Run tools/lift.sh first.")
@@ -148,6 +151,9 @@ add_library(joyride_runtime STATIC
     src/platform/driveby.c
     src/platform/savegame.c)
 target_include_directories(joyride_runtime PRIVATE src/hle)
+if(JOYRIDE_RELEASE)
+    target_compile_definitions(joyride_runtime PRIVATE JOYRIDE_RELEASE)
+endif()
 target_compile_options(joyride_runtime PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-format-truncation)
 target_link_libraries(joyride_runtime PUBLIC win32hle)
 if(JOYRIDE_WITH_FFMPEG)

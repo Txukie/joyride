@@ -12,6 +12,9 @@
  *
  * L5 (F8): all weapons (99 rounds each: player +0x13F + slot, slots
  * 1-4) and, in a vehicle, the next model the style has (swap_model).
+ *
+ * Releases (JOYRIDE_RELEASE: the AppImage, the Windows bundle) have
+ * neither: no report, no weapons, no swapped cars (so no tank).
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -146,6 +149,9 @@ static void save_memory(const char *dir) {
 }
 
 void joyride_debug_report(void) {
+#ifdef JOYRIDE_RELEASE
+    return;                                              /* not in releases */
+#endif
     if (!g_dir[0]) return;
     char stamp[64], dir[4300], path[4400];
     time_t now = time(NULL);
@@ -340,6 +346,9 @@ static void swap_model(uint32_t c, int model) {
 }
 
 void joyride_debug_give(void) {
+#ifdef JOYRIDE_RELEASE
+    return;                                              /* not in releases */
+#endif
     uint32_t r = rec();
     for (int w = 1; w <= 4; w++) MEM8(r + 0x13F + w) = 99;
     fprintf(stderr, "[debug] all weapons\n");

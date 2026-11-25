@@ -32,7 +32,7 @@ rm -rf "$A"
 mkdir -p "$A/usr/bin" "$J" "$A/usr/share/joyride" "$A/usr/share/applications" "$A/usr/share/icons/hicolor/256x256/apps"
 
 echo "== joyride's runtime (no game code)"
-cmake -S "$root" -B "$work/runtime" -G Ninja -DCMAKE_BUILD_TYPE=Release -DJOYRIDE_RUNTIME_ONLY=ON >/dev/null
+cmake -S "$root" -B "$work/runtime" -G Ninja -DCMAKE_BUILD_TYPE=Release -DJOYRIDE_RUNTIME_ONLY=ON -DJOYRIDE_RELEASE=ON >/dev/null
 cmake --build "$work/runtime" --target joyride_runtime win32hle
 cp "$work/runtime/libjoyride_runtime.a" "$work/runtime/libwin32hle.a" "$J/"
 if nm --defined-only "$J"/*.a 2>/dev/null | grep -qE ' sub_[0-9A-F]{8}$'; then

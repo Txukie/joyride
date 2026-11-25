@@ -183,7 +183,8 @@ you aim doesn't move.
 keyboard); Select shows the city map; d-pad up / down zoom the game in and
 out (from twice as close to twice as far; + and - on the keyboard);
 L3+R3 opens the settings; the left back buttons (L4 / L5 on a Steam
-Controller or Steam Deck) are the debugging keys below. In the
+Controller or Steam Deck) are the debugging keys below, in builds from
+the source (not in releases). In the
 game's menus the d-pad or left stick move, A (or Start) accepts and B goes
 back.
 
@@ -220,6 +221,9 @@ keeps them in `~/.local/share/joyride/maps/`; delete them to rebuild.
 See [`src/platform/map.c`](src/platform/map.c).
 
 ### Debugging (L4 / L5, F7 / F8)
+
+Only in builds from the source: releases (the AppImage, the Windows
+bundle; `-DJOYRIDE_RELEASE=ON`) have neither.
 
 L4 (F7) writes a report to `~/.local/share/joyride/debug/<time>/`
 for a bug report: `report.txt` (the settings, and the last ten seconds of
