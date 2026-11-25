@@ -166,8 +166,11 @@ static int convert_to(uint32_t *out, const uint8_t *px, int w, int h, int pitch,
                 o[x] = 0xFF000000u | (r << 3 | r >> 2) << 16 | (g << 2 | g >> 4) << 8 | (b << 3 | b >> 2);
             }
             break;
-        case 8:
-            for (int x = 0; x < w; x++) o[x] = 0xFF000000u | (pal ? pal[row[x]] & 0xFFFFFFu : row[x] * 0x010101u);
+        case 8:                                  /* the palette's PALETTEENTRYs: red, green, blue, flags */
+            for (int x = 0; x < w; x++) {
+                uint32_t c = pal ? pal[row[x]] : row[x] * 0x010101u;
+                o[x] = 0xFF000000u | (c & 0xFFu) << 16 | (c & 0xFF00u) | (c >> 16 & 0xFFu);
+            }
             break;
         default:
             return 0;
@@ -251,6 +254,61 @@ static int backdrop_pass(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *swap, int sw
     bi.load_op = SDL_GPU_LOADOP_DONT_CARE;
     bi.filter = SDL_GPU_FILTER_LINEAR;
     SDL_BlitGPUTexture(cmd, &bi);
+    return 1;
+}
+
+/* The intro movie on a screen that is not 4:3: the game puts it, 320 x 200
+ * doubled, at rows 40..440 of its 640 x 480 (0x44B160: SmackToBuffer at
+ * y 20). Just that is shown, as large as the window's height lets it, and
+ * around it the movie itself, blurred: the frame halved down to a few
+ * pixels and stretched back over the window, so the sides take each
+ * scene's colours (BMG's dark blue, DMA's white) as it plays. */
+#define AMB_N 5
+static SDL_GPUTexture *g_amb[AMB_N + 1];
+static int g_amb_w[AMB_N + 1], g_amb_h[AMB_N + 1], g_amb_ok = -1;
+static void blit_rect(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *src, SDL_FRect s, SDL_GPUTexture *dst, SDL_FRect d, int clear) {
+    SDL_GPUBlitInfo bi;
+    SDL_zero(bi);
+    bi.source.texture = src;
+    bi.source.x = (Uint32)s.x, bi.source.y = (Uint32)s.y, bi.source.w = (Uint32)s.w, bi.source.h = (Uint32)s.h;
+    bi.destination.texture = dst;
+    bi.destination.x = (Uint32)d.x, bi.destination.y = (Uint32)d.y, bi.destination.w = (Uint32)d.w, bi.destination.h = (Uint32)d.h;
+    bi.load_op = clear ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+    bi.clear_color = (SDL_FColor){ 0, 0, 0, 1 };
+    bi.filter = SDL_GPU_FILTER_LINEAR;
+    SDL_BlitGPUTexture(cmd, &bi);
+}
+static int movie_pass(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *pic, int pw, int ph, int w, int h,
+                      SDL_GPUTexture *swap, int sw, int sh) {
+    if (w != 640 || h != 480 || !joyride_movie_playing()) return 0;
+    if (abs(sw * 3 - sh * 4) <= sh / 50) return 0;       /* 4:3: as the game shows it */
+    if (g_amb_ok < 0) {                                   /* 320x200 halved to 20x12, and 80x50 to come back up */
+        g_amb_ok = 1;
+        for (int i = 0; i <= AMB_N; i++) {
+            g_amb_w[i] = i < AMB_N ? 320 >> i : 80, g_amb_h[i] = i < AMB_N ? 200 >> i : 50;
+            g_amb[i] = make_tex(g_amb_w[i], g_amb_h[i], SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET);
+            if (!g_amb[i]) g_amb_ok = 0;
+        }
+    }
+    if (!g_amb_ok) return 0;
+    SDL_FRect movie = { 0, 40.0f * ph / h, (float)pw, 400.0f * ph / h };
+    SDL_FRect prev = movie;
+    SDL_GPUTexture *from = pic;
+    for (int i = 0; i < AMB_N; i++) {                     /* each step halves: four texels to one */
+        SDL_FRect d = { 0, 0, (float)g_amb_w[i], (float)g_amb_h[i] };
+        blit_rect(cmd, from, prev, g_amb[i], d, 0);
+        from = g_amb[i], prev = d;
+    }
+    SDL_FRect up = { 0, 0, (float)g_amb_w[AMB_N], (float)g_amb_h[AMB_N] };
+    blit_rect(cmd, from, prev, g_amb[AMB_N], up, 0);
+    /* over the window, cropped to its shape about the middle */
+    double s = fmax((double)sw / up.w, (double)sh / up.h);
+    SDL_FRect crop = { (float)((up.w - sw / s) / 2), (float)((up.h - sh / s) / 2), (float)(sw / s), (float)(sh / s) };
+    blit_rect(cmd, g_amb[AMB_N], crop, swap, (SDL_FRect){ 0, 0, (float)sw, (float)sh }, 1);
+    /* the movie, as large as fits */
+    double k = fmin(sw / 640.0, sh / 400.0);
+    SDL_FRect d = { (float)floor((sw - 640 * k) / 2), (float)floor((sh - 400 * k) / 2), (float)floor(640 * k), (float)floor(400 * k) };
+    blit_rect(cmd, pic, movie, swap, d, 0);
     return 1;
 }
 
@@ -1135,16 +1193,35 @@ static void present(int flip) {
     map_pass(cmd, pic, pw, ph);
     if (g_snap_left && !(cmd = snap_frame(cmd, pic, pw, ph, px, w, h, pitch, bpp, joyride_smooth_frame_kind()))) return;
     joyride_debug_frame(2, 0, 0);                        /* debug.c's record: presented */
-    if (!g_win) { headless_dump(cmd, pic, pw, ph); return; }
-
     SDL_GPUTexture *swap = NULL;
     Uint32 sw = 0, sh = 0;
-    hle_block_begin();                                   /* a wait for the display: let timers run */
-    int ok = SDL_WaitAndAcquireGPUSwapchainTexture(cmd, g_win, &swap, &sw, &sh);
-    hle_block_end();
-    if (!ok || !swap || !sw || !sh) { SDL_SubmitGPUCommandBuffer(cmd); return; }
+    if (!g_win) {
+        /* headless: the game's picture as it is, or (JOYRIDE_GPU_DUMP_SIZE=
+         * WxH) a window of that size as it would show, for checking the
+         * presenting (backdrops, the movie) without a window */
+        static int vw = -1, vh;
+        static SDL_GPUTexture *virt;
+        if (vw < 0) {
+            const char *e = getenv("JOYRIDE_GPU_DUMP_SIZE");
+            vw = 0;
+            if (e && sscanf(e, "%dx%d", &vw, &vh) == 2 && vw > 0 && vh > 0 && vw <= 8192 && vh <= 8192)
+                virt = make_tex(vw, vh, SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET);
+        }
+        if (!virt) { headless_dump(cmd, pic, pw, ph); return; }
+        swap = virt, sw = (Uint32)vw, sh = (Uint32)vh;
+    } else {
+        hle_block_begin();                               /* a wait for the display: let timers run */
+        int ok = SDL_WaitAndAcquireGPUSwapchainTexture(cmd, g_win, &swap, &sw, &sh);
+        hle_block_end();
+        if (!ok || !swap || !sw || !sh) { SDL_SubmitGPUCommandBuffer(cmd); return; }
+    }
 
     place(w, h, (int)sw, (int)sh);                       /* the game's size sets the shape */
+    if (movie_pass(cmd, pic, pw, ph, w, h, swap, (int)sw, (int)sh)) {
+        if (!g_win) headless_dump(cmd, swap, (int)sw, (int)sh);
+        else SDL_SubmitGPUCommandBuffer(cmd);
+        return;
+    }
     int clear = !backdrop_pass(cmd, swap, (int)sw, (int)sh, w, h);
     if (g_mode == MODE_SHARP && (g_dst.w > pw || g_dst.h > ph)) {
         int k = (int)ceil(fmax(g_dst.w / pw, g_dst.h / ph));
@@ -1163,7 +1240,8 @@ static void present(int flip) {
         SDL_GPUFilter f = g_mode == MODE_SMOOTH || g_mode == MODE_SHARP ? SDL_GPU_FILTER_LINEAR : SDL_GPU_FILTER_NEAREST;
         blit(cmd, pic, pw, ph, swap, g_dst, f, clear);
     }
-    SDL_SubmitGPUCommandBuffer(cmd);
+    if (!g_win) headless_dump(cmd, swap, (int)sw, (int)sh);
+    else SDL_SubmitGPUCommandBuffer(cmd);
 }
 
 /* The game drew into the primary (a blit, an Unlock, a Flip). */

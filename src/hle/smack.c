@@ -72,6 +72,7 @@ static int g_trace = -1;             /* JOYRIDE_SMKTRACE=1: log the calls */
 #define TRACE(...) do { if (g_trace < 0) g_trace = getenv("JOYRIDE_SMKTRACE") != NULL; \
                         if (g_trace) fprintf(stderr, "[smack] " __VA_ARGS__); } while (0)
 
+int joyride_movie_playing(void) { return g_movie != NULL; }
 static movie_t *movie_of(uint32_t va) { return g_movie && g_movie->va == va ? g_movie : NULL; }
 
 static void movie_free(movie_t *m) {
@@ -284,6 +285,7 @@ static void s_SmackClose(void) {
 
 #else  /* no ffmpeg: the game skips the movie */
 
+int joyride_movie_playing(void) { return 0; }
 static void s_SmackOpen(void) {
     fprintf(stderr, "[smack] SmackOpen(%s): built without ffmpeg, movie skipped\n", A32(0) ? ASTR(0) : "(handle)");
     RET(0, 3);

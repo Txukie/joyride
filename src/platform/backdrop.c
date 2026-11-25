@@ -4,10 +4,12 @@
  * stand between black bars. A wide picture made to go around the menu
  * background (its middle left dark, where the menu covers it) is drawn
  * filling the window behind them instead, cropped about its middle to the
- * window's shape (screen_sdl3.c). It is the player's own: looked for in
- * <data>/extracted/menu/ as delta.png (SDL reads it) or delta.jpg (read
- * through ffmpeg, as the intro movie is, when joyride has it). None: bars,
- * as before.
+ * window's shape (screen_sdl3.c). Looked for in <data>/extracted/menu/:
+ * the game's, <game>.png (gta1, london1969, london1961), made from its own
+ * menus by tools/backdrops.py (the launcher runs it; a picture of the
+ * player's own can take its place), else delta.png (SDL reads it) or
+ * delta.jpg (read through ffmpeg, as the intro movie is, when joyride has
+ * it). None: bars, as before.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -104,8 +106,17 @@ done:
 
 void joyride_backdrop_init(const char *data_dir) {
     char path[4096];
-    snprintf(path, sizeof path, "%s/extracted/menu/delta.png", data_dir);
+    /* this game's (JOYRIDE_PROFILE: London's, main.c; none: GTA's), made by
+     * tools/backdrops.py or put there by the player; else delta.png or
+     * delta.jpg */
+    const char *prof = getenv("JOYRIDE_PROFILE");
+    int safe = prof && *prof && !strchr(prof, '/') && strcmp(prof, ".") && strcmp(prof, "..");
+    snprintf(path, sizeof path, "%s/extracted/menu/%.64s.png", data_dir, safe ? prof : "gta1");
     int ok = from_png(path);
+    if (!ok) {
+        snprintf(path, sizeof path, "%s/extracted/menu/delta.png", data_dir);
+        ok = from_png(path);
+    }
 #ifdef JOYRIDE_WITH_FFMPEG
     if (!ok) {
         snprintf(path, sizeof path, "%s/extracted/menu/delta.jpg", data_dir);

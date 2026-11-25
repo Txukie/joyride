@@ -91,6 +91,7 @@ void joyride_map_init(const char *install_root, const char *data_dir);
 /* the picture around the menus on wide screens (src/platform/backdrop.c) */
 void joyride_backdrop_init(const char *data_dir);
 int joyride_backdrop(const uint8_t **bgra, int *w, int *h);
+int joyride_movie_playing(void);                /* the intro movie is on the screen (smack.c) */
 void joyride_map_toggle(void);
 int  joyride_map_open(void);
 void joyride_camera_zoom(int dir);

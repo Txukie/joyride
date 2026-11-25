@@ -25,7 +25,7 @@ Backend::Backend(QObject *parent) : QObject(parent) {}
 QString Backend::homeDir() const { return QDir::homePath(); }
 
 QString Backend::backdrop() const {
-    for (const char *n : { "delta.png", "delta.jpg" }) {
+    for (const char *n : { "gta1.png", "delta.png", "delta.jpg" }) {
         QString p = q(jl::dataRoot()) + "/extracted/menu/" + n;
         if (QFileInfo::exists(p)) return QUrl::fromLocalFile(p).toString();
     }
@@ -147,14 +147,15 @@ void Backend::prepare() {
     steps_.clear();
     if (!QFileInfo::exists(src + "/external/pcrecomp/tools/__main__.py"))
         steps_ << qMakePair(QString("git"), QStringList{ "submodule", "update", "--init", "--recursive" });
-    if (!QFileInfo::exists(src + "/.venv/bin/python")) {
+    if (!QFileInfo::exists(src + "/.venv/bin/python"))
         steps_ << qMakePair(QString("python3"), QStringList{ "-m", "venv", ".venv" });
-        steps_ << qMakePair(src + "/.venv/bin/pip", QStringList{ "install", "-r", "tools/requirements.txt" });
-    }
+    steps_ << qMakePair(src + "/.venv/bin/pip", QStringList{ "install", "-q", "-r", "tools/requirements.txt" });   // new ones too
     steps_ << qMakePair(src + "/tools/lift.sh", QStringList{ gta + "/WINO/Grand Theft Auto.exe" });
     if (!QFileInfo::exists(src + "/build/build.ninja"))
         steps_ << qMakePair(QString("cmake"), QStringList{ "-S", ".", "-B", "build", "-G", "Ninja" });
     steps_ << qMakePair(QString("cmake"), QStringList{ "--build", "build" });
+    // the pictures around the menus on wide screens, from each game's own
+    steps_ << qMakePair(src + "/.venv/bin/python", QStringList{ "tools/backdrops.py", "--all", q(jl::dataRoot()) });
     setProgress(0.02);
     runSteps();
 }
@@ -192,6 +193,14 @@ void Backend::play(const QString &id) {
     if (!qEnvironmentVariableIsEmpty("JOYRIDE_LAUNCHER_SHOT")) {   // checking the interface: start nothing
         qInfo("[launcher] would play %s from %s", qPrintable(id), qPrintable(dir));
         return;
+    }
+    // this game's picture around the menus, made the first time (a few seconds)
+    QString pic = q(jl::dataRoot()) + "/extracted/menu/" + id + ".png", py = sourceDir() + "/.venv/bin/python";
+    if (!QFileInfo::exists(pic) && QFileInfo::exists(py)) {
+        QProcess mk;
+        mk.setWorkingDirectory(sourceDir());
+        mk.start(py, { "tools/backdrops.py", id, dir + "/GTADATA", pic });
+        if (!mk.waitForFinished(60000)) mk.kill();
     }
     QProcess p;                                          // its program, arguments and environment
     p.setProgram(joyrideBinary());

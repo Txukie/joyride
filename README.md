@@ -94,12 +94,18 @@ score and weapons but not that mission (the menu says first how long ago
 it started; a failed mission is offered again). See
 `src/platform/savegame.c`. Not in network games.
 
-**Menus on wide screens.** The menus stay 640×480; on a screen that is not
-4:3 joyride can fill the bars with your own wide picture made to go around
-the menu background (its middle covered by the menu): put it in
-`~/.local/share/joyride/extracted/menu/` as `delta.png`, or `delta.jpg`
-(needs the ffmpeg libraries). It is cropped about its middle to the
-window's shape, so one 21:9 picture serves 16:10, 16:9 and 21:9.
+**Menus and the intro on wide screens.** The menus stay 640×480; on a
+screen that is not 4:3 joyride puts them on a wall that goes with each
+game, made from that game's own menu art when joyride is prepared (or the
+first time the game starts), by `tools/backdrops.py`: GTA's rusted wall
+carried on, London 1969's teal with mod roundels, London 1961's with a
+houndstooth. They are in `~/.local/share/joyride/extracted/menu/` as
+`gta1.png`, `london1969.png` and `london1961.png` (32:9, cropped to the
+window); put your own picture there under that name to use it instead
+(`delta.png` or `delta.jpg` there is used for a game that has none). The
+intro movie is shown as large as the screen's height allows, and the
+space beside it is filled with the movie itself, blurred, so it follows
+each scene.
 
 With the software renderer, up to 2560×1440 keeps the game's full speed
 with filtering, but with few frames between steps; the GPU renderer keeps
