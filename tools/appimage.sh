@@ -133,7 +133,9 @@ echo "== libraries, Qt, the AppImage"
 libs=()
 linked=()
 for l in libSDL3_ttf.so libSDL3.so libavformat.so libavcodec.so libavutil.so; do   # by the name programs load them by
-    at="$(readlink -f "$(gcc -print-file-name="$l")")"     # wherever this system has it (/usr/lib, /usr/local/lib...)
+    at="$(gcc -print-file-name="$l")"                     # wherever this system has it: GCC's paths,
+    case "$at" in */*) ;; *) at="$(ldconfig -p | awk -v n="$l" '$1 == n { print $NF; exit }')";; esac   # else the loader's (/usr/local/lib)
+    at="$(readlink -f "$at")"
     soname="$(objdump -p "$at" | sed -n 's/^ *SONAME *//p')"
     libs+=(-l "$(dirname "$at")/$soname")
     linked+=("\"../$soname\"")
