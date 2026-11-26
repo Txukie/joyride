@@ -56,7 +56,7 @@ if(Qt6_FOUND AND SDL3_FOUND)
     # joyride's own art (art/, made by tools/art.py): the background, the icon
     qt_add_resources(joyride-launcher "art" PREFIX "/" BASE ".."
         FILES ../art/background.png ../art/joyride-16.png ../art/joyride-32.png ../art/joyride-48.png
-              ../art/joyride-64.png ../art/joyride-128.png ../art/joyride-256.png)
+              ../art/joyride-64.png ../art/joyride-128.png ../art/joyride-256.png ../art/controls.png)
     target_link_libraries(joyride-launcher PRIVATE joyride_setup Qt6::Quick Qt6::QuickControls2 SDL3::SDL3)
     # where joyride's checkout is: preparing runs its tools/lift.sh and build
     get_filename_component(JOYRIDE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)

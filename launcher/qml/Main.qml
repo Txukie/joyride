@@ -130,8 +130,16 @@ ApplicationWindow {
                         id: settingsBtn
                         text: "Settings"
                         KeyNavigation.up: cards
-                        KeyNavigation.right: prepBtn
+                        KeyNavigation.right: controlsBtn
                         onClicked: stack.push(settingsPage)
+                    }
+                    BigButton {
+                        id: controlsBtn
+                        text: "Controls"
+                        KeyNavigation.up: cards
+                        KeyNavigation.left: settingsBtn
+                        KeyNavigation.right: prepBtn
+                        onClicked: stack.push(controlsPage)
                     }
                     BigButton {
                         id: prepBtn
@@ -139,7 +147,7 @@ ApplicationWindow {
                         primary: !backend.joyrideReady
                         enabled: gameById("gta1") && gameById("gta1").installed
                         KeyNavigation.up: cards
-                        KeyNavigation.left: settingsBtn
+                        KeyNavigation.left: controlsBtn
                         onClicked: backend.prepare()
                     }
                     Text {
@@ -329,6 +337,40 @@ ApplicationWindow {
                     }
                     ScrollBar.vertical: ScrollBar {}
                 }
+            }
+        }
+    }
+
+    // ---- controls: the controller's scheme (art/controls.png, from art/controls.svg) ----
+    Component {
+        id: controlsPage
+        FocusScope {
+            property string title: "Controls"
+            focus: true
+            Component.onCompleted: forceActiveFocus()
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 16
+                Image {
+                    id: scheme
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: width * sourceSize.height / sourceSize.width
+                    Layout.maximumHeight: parent.height - 90
+                    source: "qrc:/art/controls.png"
+                    fillMode: Image.PreserveAspectFit
+                    horizontalAlignment: Image.AlignHCenter
+                    verticalAlignment: Image.AlignTop
+                    smooth: true
+                    mipmap: true
+                }
+                Text {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: win.dim
+                    font.pixelSize: 17
+                    text: "The modern scheme (the default; Settings → Controller). Any controller works: on PlayStation or Switch pads the same places. Driving, A is the handbrake. The keyboard works alongside."
+                }
+                Item { Layout.fillHeight: true }
             }
         }
     }

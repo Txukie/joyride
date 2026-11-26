@@ -148,6 +148,12 @@ with no setup. Two schemes, switched in F1 → Controller
 (`controller=modern|classic` in `joyride.cfg`, `JOYRIDE_CONTROLLER` for one
 run). The keyboard keeps working alongside either.
 
+![The modern scheme on an Xbox controller: left stick move, right stick aim, RT accelerate, LT brake, RB / LB next / previous weapon, Y enter / exit vehicles, X shoot, B special, A jump over vehicles, d-pad up / down zoom in / out, d-pad right / left next / previous radio station, Menu pause, View map, L3 + R3 joyride's settings](art/controls.png)
+
+The modern scheme at a glance (also in the launcher: *Controls*); its
+source is `art/controls.svg`. The same places on PlayStation and Switch
+pads. In detail:
+
 **Modern, on foot**
 
 | | |
@@ -265,6 +271,9 @@ the next model the city has (all but the tank). See
 `launcher/` is a front end for all of it, made for a controller as much as
 for keys and mouse (Qt Quick; controllers through SDL3: d-pad or stick
 move, A chooses, B goes back, Start plays):
+
+Its *Controls* page shows the controller scheme (the picture under
+*Controllers* above), so it's there before the first game.
 
 The launcher downloads nothing: every game comes from a copy you own.
 
