@@ -9,8 +9,8 @@ import Qt.labs.folderlistmodel
 
 ApplicationWindow {
     id: win
-    width: 1280
-    height: 800
+    width: 1440
+    height: 900
     minimumWidth: 900
     minimumHeight: 600
     visible: true
@@ -99,13 +99,17 @@ ApplicationWindow {
                 var g = backend.games[cards.currentIndex]
                 if (g && g.installed && g.playable && backend.joyrideReady) backend.play(g.id)
             }
+            id: home
+            // the cards shorter where the window is: the controls below keep their room
+            readonly property bool compact: height < 1100
+            readonly property bool tiny: height < 800
             ColumnLayout {
                 anchors.fill: parent
-                spacing: 24
+                spacing: 20
                 ListView {
                     id: cards
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 420
+                    Layout.preferredHeight: home.tiny ? 210 : home.compact ? 330 : 420
                     orientation: ListView.Horizontal
                     spacing: 28
                     model: backend.games
@@ -116,6 +120,8 @@ ApplicationWindow {
                     leftMargin: 8
                     delegate: GameCard {
                         game: modelData
+                        compact: home.compact
+                        tiny: home.tiny
                         current: cards.activeFocus && ListView.isCurrentItem
                         y: 16
                         onActivated: { cards.currentIndex = index; stack.push(gamePage, { gameId: modelData.id }) }
@@ -123,6 +129,26 @@ ApplicationWindow {
                     Keys.onReturnPressed: stack.push(gamePage, { gameId: backend.games[currentIndex].id })
                     Keys.onEnterPressed: stack.push(gamePage, { gameId: backend.games[currentIndex].id })
                     KeyNavigation.down: settingsBtn
+                }
+                // the controller's scheme, always in view (art/controls.svg, made for
+                // dark pages by tools/controls_art.py)
+                Image {
+                    id: homeScheme
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    source: "qrc:/art/controls-dark.png"
+                    fillMode: Image.PreserveAspectFit
+                    smooth: true
+                    mipmap: true
+                    // a soft dark under it: the city's lights stay out of the labels
+                    Rectangle {
+                        z: -1
+                        anchors.centerIn: parent
+                        width: homeScheme.paintedWidth + 64
+                        height: homeScheme.paintedHeight + 32
+                        radius: 24
+                        color: "#b30f1115"
+                    }
                 }
                 RowLayout {
                     spacing: 20
@@ -341,7 +367,7 @@ ApplicationWindow {
         }
     }
 
-    // ---- controls: the controller's scheme (art/controls.png, from art/controls.svg) ----
+    // ---- controls: the controller's scheme, as big as the window allows ----
     Component {
         id: controlsPage
         FocusScope {
@@ -356,7 +382,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.preferredHeight: width * sourceSize.height / sourceSize.width
                     Layout.maximumHeight: parent.height - 90
-                    source: "qrc:/art/controls.png"
+                    source: "qrc:/art/controls-dark.png"
                     fillMode: Image.PreserveAspectFit
                     horizontalAlignment: Image.AlignHCenter
                     verticalAlignment: Image.AlignTop

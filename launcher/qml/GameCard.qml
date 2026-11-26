@@ -5,9 +5,12 @@ Rectangle {
     id: card
     property var game
     property bool current: false
+    // room on the home page for the controls: a short band, or none
+    property bool compact: false
+    property bool tiny: false
     signal activated()
     width: 300
-    height: 380
+    height: tiny ? 170 : compact ? 290 : 380
     radius: 16
     color: "#1b1e23"
     border.width: current ? 4 : 1
@@ -19,7 +22,8 @@ Rectangle {
     // a coloured band standing for the box art (none is shipped)
     Rectangle {
         anchors { left: parent.left; right: parent.right; top: parent.top; margins: 12 }
-        height: 200
+        visible: !card.tiny
+        height: card.compact ? 110 : 200
         radius: 10
         gradient: Gradient {
             GradientStop { position: 0; color: card.game && card.game.id.indexOf("london") === 0 ? "#1e3a8a" : card.game && card.game.id === "gta2" ? "#4c1d95" : "#7c2d12" }
