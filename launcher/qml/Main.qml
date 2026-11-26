@@ -136,6 +136,7 @@ ApplicationWindow {
                     id: homeScheme
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    Layout.maximumHeight: 560            // as at 1080p: on a big screen at 100%, not the whole page
                     source: "qrc:/art/controls-dark.png"
                     fillMode: Image.PreserveAspectFit
                     smooth: true
