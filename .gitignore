@@ -34,3 +34,4 @@ __pycache__/
 .venv/
 build-appimage/
 build-win/
+build-release-linux/

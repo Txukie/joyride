@@ -114,6 +114,7 @@ target_link_libraries(win32hle PUBLIC SDL3::SDL3 SDL3_ttf::SDL3_ttf Threads::Thr
 # --- shaders: GLSL -> SPIR-V at build time (glslc, from shaderc), embedded
 # as C arrays. Without glslc the texture filter runs on the CPU only.
 find_program(GLSLC glslc)
+set(JOYRIDE_PREBUILT_SHADERS "" CACHE PATH "The shaders as C headers, compiled elsewhere (where there is no glslc)")
 if(GLSLC)
     set(JOYRIDE_SHADER_DIR "${CMAKE_BINARY_DIR}/shaders")
     set(JOYRIDE_SHADER_HEADERS)
@@ -128,6 +129,12 @@ if(GLSLC)
     endforeach()
     add_custom_target(joyride_shaders DEPENDS ${JOYRIDE_SHADER_HEADERS})
     add_dependencies(win32hle joyride_shaders)
+    target_include_directories(win32hle PRIVATE "${JOYRIDE_SHADER_DIR}")
+    target_compile_definitions(win32hle PRIVATE JOYRIDE_GPU_FILTER)
+elseif(JOYRIDE_PREBUILT_SHADERS)
+    # compiled elsewhere (glslc -O -mfmt=c, the same headers): a build where
+    # glslc is not, as the release's (tools/release-linux)
+    set(JOYRIDE_SHADER_DIR "${JOYRIDE_PREBUILT_SHADERS}")
     target_include_directories(win32hle PRIVATE "${JOYRIDE_SHADER_DIR}")
     target_compile_definitions(win32hle PRIVATE JOYRIDE_GPU_FILTER)
 else()

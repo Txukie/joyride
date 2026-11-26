@@ -32,7 +32,8 @@ rm -rf "$A"
 mkdir -p "$A/usr/bin" "$J" "$A/usr/share/joyride" "$A/usr/share/applications" "$A/usr/share/icons/hicolor/256x256/apps"
 
 echo "== joyride's runtime (no game code)"
-cmake -S "$root" -B "$work/runtime" -G Ninja -DCMAKE_BUILD_TYPE=Release -DJOYRIDE_RUNTIME_ONLY=ON -DJOYRIDE_RELEASE=ON >/dev/null
+cmake -S "$root" -B "$work/runtime" -G Ninja -DCMAKE_BUILD_TYPE=Release -DJOYRIDE_RUNTIME_ONLY=ON -DJOYRIDE_RELEASE=ON \
+      ${JOYRIDE_PREBUILT_SHADERS:+-DJOYRIDE_PREBUILT_SHADERS="$JOYRIDE_PREBUILT_SHADERS"} >/dev/null
 cmake --build "$work/runtime" --target joyride_runtime win32hle
 cp "$work/runtime/libjoyride_runtime.a" "$work/runtime/libwin32hle.a" "$J/"
 if nm --defined-only "$J"/*.a 2>/dev/null | grep -qE ' sub_[0-9A-F]{8}$'; then
@@ -40,7 +41,7 @@ if nm --defined-only "$J"/*.a 2>/dev/null | grep -qE ' sub_[0-9A-F]{8}$'; then
 fi
 
 echo "== the launcher"
-cmake -S "$root/launcher" -B "$work/launcher" -G Ninja -DCMAKE_BUILD_TYPE=Release >/dev/null
+cmake -S "$root/launcher" -B "$work/launcher" -G Ninja -DCMAKE_BUILD_TYPE=Release ${QT_DIR:+-DCMAKE_PREFIX_PATH="$QT_DIR"} >/dev/null
 cmake --build "$work/launcher"
 install -m755 "$work/launcher/joyride-launcher" "$work/launcher/joyride-setup" "$A/usr/bin/"
 
@@ -51,19 +52,28 @@ echo "$version $(git -C "$root" rev-parse --short HEAD)" > "$A/usr/share/joyride
 
 echo "== Python"
 P="$J/python"
-pyver="$("$root/.venv/bin/python" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')"
-pybin="$(readlink -f "$(command -v "python$pyver")")"
-stdlib="$(python$pyver -c 'import sysconfig; print(sysconfig.get_paths()["stdlib"])')"
-mkdir -p "$P/bin" "$P/lib"
-cp "$pybin" "$P/bin/python3"
-rsync -a --exclude site-packages --exclude test --exclude tests --exclude idlelib --exclude tkinter \
-      --exclude turtledemo --exclude ensurepip --exclude '__pycache__' "$stdlib/" "$P/lib/python$pyver/"
-site="$P/lib/python$pyver/site-packages"
-mkdir -p "$site"
-for p in capstone unicorn pefile.py peutils.py ordlookup numpy numpy.libs PIL pillow.libs; do
-    src="$root/.venv/lib/python$pyver/site-packages/$p"
-    [ -e "$src" ] && cp -a "$src" "$site/"
-done
+if [ -n "${JOYRIDE_PYTHON_HOME:-}" ]; then
+    # a relocatable Python with the tools' packages (the release container's,
+    # python-build-standalone): copied whole, less pip, tests and the GUI
+    cp -a "$JOYRIDE_PYTHON_HOME" "$P"
+    rm -rf "$P"/lib/python3*/{test,idlelib,tkinter,turtledemo,ensurepip} "$P"/lib/python3*/site-packages/pip* "$P"/share "$P"/include
+    find "$P" -name __pycache__ -prune -exec rm -rf {} +
+else
+    # this machine's Python and the checkout's .venv packages
+    pyver="$("$root/.venv/bin/python" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')"
+    pybin="$(readlink -f "$(command -v "python$pyver")")"
+    stdlib="$(python$pyver -c 'import sysconfig; print(sysconfig.get_paths()["stdlib"])')"
+    mkdir -p "$P/bin" "$P/lib"
+    cp "$pybin" "$P/bin/python3"
+    rsync -a --exclude site-packages --exclude test --exclude tests --exclude idlelib --exclude tkinter \
+          --exclude turtledemo --exclude ensurepip --exclude '__pycache__' "$stdlib/" "$P/lib/python$pyver/"
+    site="$P/lib/python$pyver/site-packages"
+    mkdir -p "$site"
+    for p in capstone unicorn pefile.py peutils.py ordlookup numpy numpy.libs PIL pillow.libs; do
+        src="$root/.venv/lib/python$pyver/site-packages/$p"
+        [ -e "$src" ] && cp -a "$src" "$site/"
+    done
+fi
 
 echo "== the compiler"
 C="$J/cc"
@@ -74,18 +84,27 @@ mkdir -p "$C/bin" "$G" "$C/sysroot/usr/lib" "$C/sysroot/usr/include"
 cp "$(readlink -f "$(command -v gcc)")" "$C/bin/gcc"
 for f in cc1 collect2 lto-wrapper liblto_plugin.so crtbegin.o crtbeginS.o crtend.o crtendS.o libgcc.a libgcc_eh.a libgcc_s.so \
          libgcc_s_asneeded.so libatomic_asneeded.so; do
-    cp -a "$gdir/$f" "$G/"
+    [ -e "$gdir/$f" ] && cp -a "$gdir/$f" "$G/"            # (the last two: GCC 16's)
 done
 cp -a "$gdir/include" "$G/"
 cp "$(readlink -f /usr/bin/as)" "$G/as"
 cp "$(readlink -f /usr/bin/ld.bfd)" "$G/ld"
-# glibc's headers and link files, and the kernel's headers
-pacman -Qlq glibc linux-api-headers | grep '^/usr/include/.' | while read -r f; do
-    [ -d "$f" ] && mkdir -p "$C/sysroot$f" || cp -a "$f" "$C/sysroot$f"
+# glibc's headers and link files, and the kernel's headers, where this
+# system keeps them (Arch: /usr/lib; Ubuntu: /usr/lib/x86_64-linux-gnu), at
+# the same paths in the sysroot; and what glibc's link scripts name
+if command -v pacman >/dev/null; then hdrs="$(pacman -Qlq glibc linux-api-headers)"
+else hdrs="$(dpkg -L libc6-dev linux-libc-dev)"; fi
+echo "$hdrs" | grep '^/usr/include/.' | while read -r f; do
+    if [ -d "$f" ]; then mkdir -p "$C/sysroot$f"; else mkdir -p "$C/sysroot$(dirname "$f")"; cp -a "$f" "$C/sysroot$f"; fi
 done
-for f in Scrt1.o crt1.o crti.o crtn.o libc.so libc.so.6 libc_nonshared.a libm.so libm.so.6 libmvec.so.1 \
+sysfile() { [ -e "$1" ] || return 0; mkdir -p "$C/sysroot$(dirname "$1")"; cp -L "$1" "$C/sysroot$1"; }
+libdir="$(dirname "$(gcc -print-file-name=libc.so)")"
+for f in Scrt1.o crt1.o crti.o crtn.o libc.so libc.so.6 libc_nonshared.a libm.so libm.so.6 libmvec.so libmvec.so.1 \
          ld-linux-x86-64.so.2 libpthread.a libpthread.so.0 libdl.a libdl.so.2 librt.a libgcc_s.so.1 libatomic.so libatomic.so.1; do
-    cp -a "$(readlink -f "/usr/lib/$f")" "$C/sysroot/usr/lib/$f"
+    sysfile "$libdir/$f"
+done
+for s in libc.so libm.so; do
+    for f in $(grep -oE '/[^ )]+' "$libdir/$s" | grep -v '^/\*'); do sysfile "$f"; done
 done
 cat > "$C/joyride-cc" <<'EOF'
 #!/bin/sh
@@ -114,8 +133,9 @@ echo "== libraries, Qt, the AppImage"
 libs=()
 linked=()
 for l in libSDL3_ttf.so libSDL3.so libavformat.so libavcodec.so libavutil.so; do   # by the name programs load them by
-    soname="$(objdump -p "/usr/lib/$l" | sed -n 's/^ *SONAME *//p')"
-    libs+=(-l "/usr/lib/$soname")
+    at="$(readlink -f "$(gcc -print-file-name="$l")")"     # wherever this system has it (/usr/lib, /usr/local/lib...)
+    soname="$(objdump -p "$at" | sed -n 's/^ *SONAME *//p')"
+    libs+=(-l "$(dirname "$at")/$soname")
     linked+=("\"../$soname\"")
 done
 # how tools/link_game.py links the game to the runtime here
@@ -127,7 +147,8 @@ cat > "$J/link.json" <<EOF
 EOF
 cd "$work"
 # Wayland's own plugins beside the platform one (xdg-shell, decorations, its GL)
-qtplugins="$(qmake6 -query QT_INSTALL_PLUGINS)"
+QMAKE="${QMAKE:-$(command -v qmake6 || command -v qmake)}"
+qtplugins="$("$QMAKE" -query QT_INSTALL_PLUGINS)"
 mkdir -p "$A/usr/plugins"
 for d in wayland-shell-integration wayland-decoration-client wayland-graphics-integration-client; do
     cp -a "$qtplugins/$d" "$A/usr/plugins/"
@@ -138,8 +159,8 @@ rtfile="$work/runtime-x86_64"
 [ -s "$rtfile" ] || curl -fsSL -o "$rtfile" https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
 LDAI_RUNTIME_FILE="$rtfile" \
 EXTRA_PLATFORM_PLUGINS="libqwayland.so;libqoffscreen.so" \
-    NO_STRIP=1 PATCHELF="$(command -v patchelf)" QML_SOURCES_PATHS="$root/launcher/qml" QMAKE="$(command -v qmake6)" LINUXDEPLOY_OUTPUT_VERSION="$version" ARCH=x86_64 \
-    linuxdeploy --appdir "$A" --plugin qt --output appimage \
+    NO_STRIP=1 PATCHELF="$(command -v patchelf)" QML_SOURCES_PATHS="$root/launcher/qml" QMAKE="$QMAKE" LINUXDEPLOY_OUTPUT_VERSION="$version" ARCH=x86_64 \
+    "${LINUXDEPLOY:-linuxdeploy}" --appdir "$A" --plugin qt --output appimage \
         -e "$A/usr/bin/joyride-launcher" -e "$A/usr/bin/joyride-setup" "${libs[@]}" \
         --deploy-deps-only "$P" --deploy-deps-only "$C" \
         -d "$A/usr/share/applications/joyride.desktop" -i "$A/usr/share/icons/hicolor/256x256/apps/joyride.png"

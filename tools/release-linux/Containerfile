@@ -1,0 +1,60 @@
+# joyride's Linux release is built in here: Ubuntu 22.04 (glibc 2.35), so the
+# AppImage runs there and on anything newer (Debian 12, Fedora 36, Mint 21,
+# SteamOS 3...). What 22.04 has too old or not at all is built or fetched:
+# SDL3 and SDL3_ttf from source, ffmpeg from source with only what joyride
+# reads (the intro's Smacker, a menu picture's JPEG), Python
+# (python-build-standalone: relocatable, for old glibc) with the tools'
+# packages, Qt 6.8 (Qt's own Linux build, through aqtinstall), linuxdeploy.
+# Nothing of the game: tools/release-linux/build.sh builds joyride's runtime
+# and launcher in here.
+#
+#   podman build -t joyride-release-linux -f tools/release-linux/Containerfile tools
+FROM docker.io/library/ubuntu:22.04
+ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake ninja-build pkg-config git curl ca-certificates xz-utils file patchelf zip \
+        nasm libarchive-dev zlib1g-dev libfreetype-dev libharfbuzz-dev \
+        libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxfixes-dev libxkbcommon-dev libxtst-dev libxrender-dev libxinerama-dev \
+        libwayland-dev wayland-protocols libdecor-0-dev libegl-dev libgl-dev libvulkan-dev libdrm-dev libgbm-dev \
+        libasound2-dev libpulse-dev libpipewire-0.3-dev libdbus-1-dev libudev-dev libibus-1.0-dev \
+        libfontconfig1 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
+        libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0 libxcb-shape0 libgl1 libegl1 libwayland-cursor0 libwayland-egl1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/build
+ARG SDL=3.4.20 TTF=3.2.2 FFMPEG=9.1
+RUN curl -fsSL https://github.com/libsdl-org/SDL/releases/download/release-$SDL/SDL3-$SDL.tar.gz | tar xz \
+    && cmake -S SDL3-$SDL -B sdl -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -DSDL_TESTS=OFF \
+    && cmake --build sdl && cmake --install sdl && rm -rf sdl SDL3-$SDL
+RUN curl -fsSL https://github.com/libsdl-org/SDL_ttf/releases/download/release-$TTF/SDL3_ttf-$TTF.tar.gz | tar xz \
+    && cmake -S SDL3_ttf-$TTF -B ttf -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -DSDLTTF_VENDORED=OFF \
+    && cmake --build ttf && cmake --install ttf && rm -rf ttf SDL3_ttf-$TTF
+# ffmpeg with only what joyride reads: Smacker (the intro) and JPEG (a menu
+# picture, delta.jpg), from files
+RUN curl -fsSL https://ffmpeg.org/releases/ffmpeg-$FFMPEG.tar.xz | tar xJ \
+    && cd ffmpeg-$FFMPEG && ./configure --prefix=/usr/local --enable-shared --disable-static --disable-programs --disable-doc \
+        --disable-everything --enable-protocol=file \
+        --enable-demuxer=smacker,image2,mjpeg --enable-decoder=smackvid,smackaud,mjpeg --enable-parser=mjpeg \
+        --disable-avdevice --disable-swresample --disable-swscale --disable-avfilter --disable-network --disable-autodetect \
+    && make -j"$(nproc)" && make install && cd .. && rm -rf ffmpeg-$FFMPEG
+RUN ldconfig
+
+# Python for the AppImage, with the tools' packages
+RUN curl -fsSL "https://github.com/astral-sh/python-build-standalone/releases/download/20261124/cpython-3.14.10%2B20261124-x86_64-unknown-linux-gnu-install_only.tar.gz" | tar xz -C /opt
+COPY requirements.txt /opt/requirements.txt
+RUN /opt/python/bin/python3 -m pip install -q --no-cache-dir -r /opt/requirements.txt
+
+# Qt 6.8 (LTS), Qt's own build for Linux, with Wayland
+ARG QT=6.8.3
+RUN /opt/python/bin/python3 -m pip install -q --no-cache-dir aqtinstall \
+    && /opt/python/bin/python3 -m aqt install-qt linux desktop $QT linux_gcc_64 -O /opt/qt \
+    && /opt/python/bin/python3 -m pip uninstall -y -q aqtinstall
+ENV QT_DIR=/opt/qt/$QT/gcc_64
+
+# linuxdeploy and its Qt plugin (AppImages: run unpacked, no FUSE in here)
+RUN mkdir -p /opt/linuxdeploy && cd /opt/linuxdeploy \
+    && curl -fsSLO https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage \
+    && curl -fsSLO https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage \
+    && chmod +x *.AppImage
+ENV APPIMAGE_EXTRACT_AND_RUN=1 PATH=/opt/linuxdeploy:$PATH
