@@ -160,7 +160,7 @@ done
 rtfile="$work/runtime-x86_64"
 [ -s "$rtfile" ] || curl -fsSL -o "$rtfile" https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
 LDAI_RUNTIME_FILE="$rtfile" \
-EXTRA_PLATFORM_PLUGINS="libqwayland.so;libqoffscreen.so" \
+EXTRA_PLATFORM_PLUGINS="$(cd "$qtplugins/platforms" && ls libqwayland*.so | tr '\n' ';')libqoffscreen.so" \
     NO_STRIP=1 PATCHELF="$(command -v patchelf)" QML_SOURCES_PATHS="$root/launcher/qml" QMAKE="$QMAKE" LINUXDEPLOY_OUTPUT_VERSION="$version" ARCH=x86_64 \
     "${LINUXDEPLOY:-linuxdeploy}" --appdir "$A" --plugin qt --output appimage \
         -e "$A/usr/bin/joyride-launcher" -e "$A/usr/bin/joyride-setup" "${libs[@]}" \
