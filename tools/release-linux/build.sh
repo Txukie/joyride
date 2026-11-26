@@ -25,4 +25,5 @@ podman run --rm -v "$root":/src:Z -w /src \
     -e JOYRIDE_PYTHON_HOME=/opt/python \
     -e QMAKE=/opt/qt/6.8.3/gcc_64/bin/qmake \
     -e LINUXDEPLOY=/opt/linuxdeploy/linuxdeploy-x86_64.AppImage \
+    -e JOYRIDE_BUNDLE_LIBS="/usr/local/lib/libfreetype.so.6 /usr/local/lib/libharfbuzz.so.0" \
     "$image" tools/appimage.sh /src/build-release-linux

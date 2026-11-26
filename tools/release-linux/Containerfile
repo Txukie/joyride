@@ -14,7 +14,7 @@ ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake ninja-build pkg-config git curl ca-certificates xz-utils file patchelf zip \
-        nasm libarchive-dev zlib1g-dev libfreetype-dev libharfbuzz-dev \
+        nasm libarchive-dev zlib1g-dev \
         libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxfixes-dev libxkbcommon-dev libxtst-dev libxrender-dev libxinerama-dev \
         libwayland-dev wayland-protocols libdecor-0-dev libegl-dev libgl-dev libvulkan-dev libdrm-dev libgbm-dev \
         libasound2-dev libpulse-dev libpipewire-0.3-dev libdbus-1-dev libudev-dev libibus-1.0-dev \
@@ -22,7 +22,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0 libxcb-shape0 libgl1 libegl1 libwayland-cursor0 libwayland-egl1 \
     && rm -rf /var/lib/apt/lists/*
 
+# Python for the AppImage, with the tools' packages
+RUN curl -fsSL "https://github.com/astral-sh/python-build-standalone/releases/download/20261124/cpython-3.14.10%2B20261124-x86_64-unknown-linux-gnu-install_only.tar.gz" | tar xz -C /opt
+COPY requirements.txt /opt/requirements.txt
+RUN /opt/python/bin/python3 -m pip install -q --no-cache-dir -r /opt/requirements.txt
+
 WORKDIR /opt/build
+# FreeType and HarfBuzz, current, for the AppImage to carry (the launcher's
+# Qt and the game's SDL3_ttf load them): newer than any distribution's, so
+# the system's fontconfig, loaded beside them, finds all it needs. Plain:
+# no PNG, Brotli, bzip2, GLib, ICU
+ARG FREETYPE=2.15.0 HARFBUZZ=15.2.0
+RUN curl -fsSL https://download.savannah.gnu.org/releases/freetype/freetype-$FREETYPE.tar.xz | tar xJ \
+    && cmake -S freetype-$FREETYPE -B ft -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -DBUILD_SHARED_LIBS=ON \
+        -DFT_REQUIRE_ZLIB=ON -DFT_DISABLE_PNG=ON -DFT_DISABLE_BROTLI=ON -DFT_DISABLE_BZIP2=ON -DFT_DISABLE_HARFBUZZ=ON \
+    && cmake --build ft && cmake --install ft && rm -rf ft freetype-$FREETYPE
+RUN /opt/python/bin/python3 -m pip install -q --no-cache-dir meson \
+    && curl -fsSL https://github.com/harfbuzz/harfbuzz/releases/download/$HARFBUZZ/harfbuzz-$HARFBUZZ.tar.xz | tar xJ \
+    && /opt/python/bin/meson setup hb harfbuzz-$HARFBUZZ --prefix=/usr/local --libdir=lib --buildtype=release \
+        -Dfreetype=enabled -Dglib=disabled -Dgobject=disabled -Dcairo=disabled -Dicu=disabled -Dchafa=disabled \
+        -Dtests=disabled -Ddocs=disabled -Dutilities=disabled -Dintrospection=disabled \
+    && ninja -C hb install && rm -rf hb harfbuzz-$HARFBUZZ \
+    && /opt/python/bin/python3 -m pip uninstall -y -q meson && ldconfig
 ARG SDL=3.4.20 TTF=3.2.2 FFMPEG=9.1
 RUN curl -fsSL https://github.com/libsdl-org/SDL/releases/download/release-$SDL/SDL3-$SDL.tar.gz | tar xz \
     && cmake -S SDL3-$SDL -B sdl -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -DSDL_TESTS=OFF \
@@ -39,11 +60,6 @@ RUN curl -fsSL https://ffmpeg.org/releases/ffmpeg-$FFMPEG.tar.xz | tar xJ \
         --disable-avdevice --disable-swresample --disable-swscale --disable-avfilter --disable-network --disable-autodetect \
     && make -j"$(nproc)" && make install && cd .. && rm -rf ffmpeg-$FFMPEG
 RUN ldconfig
-
-# Python for the AppImage, with the tools' packages
-RUN curl -fsSL "https://github.com/astral-sh/python-build-standalone/releases/download/20261124/cpython-3.14.10%2B20261124-x86_64-unknown-linux-gnu-install_only.tar.gz" | tar xz -C /opt
-COPY requirements.txt /opt/requirements.txt
-RUN /opt/python/bin/python3 -m pip install -q --no-cache-dir -r /opt/requirements.txt
 
 # Qt 6.8 (LTS), Qt's own build for Linux, with Wayland
 ARG QT=6.8.3

@@ -156,6 +156,11 @@ for d in wayland-shell-integration wayland-decoration-client wayland-graphics-in
     cp -a "$qtplugins/$d" "$A/usr/plugins/"
     libs+=(--deploy-deps-only "$A/usr/plugins/$d")
 done
+# libraries linuxdeploy leaves to the system (its exclude list: FreeType,
+# HarfBuzz) that this build carries anyway (JOYRIDE_BUNDLE_LIBS: the release
+# container's own, newer than any system's), by their sonames
+mkdir -p "$A/usr/lib"
+for f in ${JOYRIDE_BUNDLE_LIBS:-}; do cp -L "$f" "$A/usr/lib/$(basename "$f")"; done
 # the AppImage's starter (AppImage's type2-runtime), fetched once and kept
 rtfile="$work/runtime-x86_64"
 [ -s "$rtfile" ] || curl -fsSL -o "$rtfile" https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
