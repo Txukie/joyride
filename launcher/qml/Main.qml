@@ -151,6 +151,7 @@ ApplicationWindow {
                         color: "#b30f1115"
                     }
                 }
+                Item { Layout.fillHeight: true }         // what a big screen has left over: here, not between the cards and it
                 RowLayout {
                     spacing: 20
                     BigButton {
